@@ -11,12 +11,12 @@ from tkinter import messagebox
 
 class Population():
 
-	def __init__(self, population_name, morph_path, morph_name, template_path, template_name, verbose=True):
+	def __init__(self, population_name, morph_path, template_path, template_name, verbose=True):
 
 		self.cells 				= {}
 		self.population_name 	= population_name
 		self.morph_path 		= morph_path
-		self.morph_name 		= morph_name
+		# self.morph_name 		= morph_name
 		self.template_path 		= template_path
 		self.template_name 		= template_name
 		self.verbose 			= verbose
@@ -59,7 +59,7 @@ class Population():
 
 
 		if self.verbose:
-			print('- Making %s template from .hoc file'%self.template_name)
+			print('\n- Making %s template from .hoc file'%self.template_name)
 
 		# h.load_file('%s.hoc'%self.template_name)
 		h.load_file('template_%s.hoc'%self.template_name)
@@ -75,10 +75,8 @@ class Population():
 
 
 		if self.verbose:
-			print('- Creating new instantiation of %s template\n \
-		* Morphology and Biophys loaded from template\n\
-		* Synapses %s loaded'%(self.template_name, ('were'*(add_synapses)+'not'*(not add_synapses))))
-
+			print('\n- Creating new instantiation of %s template\n \
+		* Morphology and Biophys loaded from template')
 
 		idx = len(self.cells)
 		cell_name = self.population_name + str(idx) 
@@ -90,13 +88,15 @@ class Population():
 		self.cells[cell_name]['soma_v'] = h.Vector()
 		self.cells[cell_name]['soma_v'].record(self.cells[cell_name]['cell'].soma[0](0.5)._ref_v)
 
-		self.cells[cell_name]['axons'] 		= [i for i in self.cells[cell_name]['cell'].axon]
-		self.cells[cell_name]['terminals'] 	= [i for i in self.cells[cell_name]['axons'] if len(i.children())==0]
-		self.cells[cell_name]['dendrites']  = [i for i in self.cells[cell_name]['cell'].dend] + [i for i in self.cells[cell_name]['cell'].apic]
+		self.cells[cell_name]['axons'] 				= [i for i in self.cells[cell_name]['cell'].axon]
+		self.cells[cell_name]['terminals'] 			= [i for i in self.cells[cell_name]['axons'] if len(i.children())==0]
+		self.cells[cell_name]['apical_dendrites']  	= [i for i in self.cells[cell_name]['cell'].apic]
+		self.cells[cell_name]['basal_dendrites']   	= [i for i in self.cells[cell_name]['cell'].dend]
+
 		# Return to original dir
 		os.chdir(original_path)
 
-	def connectCells(self, pre_branches, post_branches, density, dist):
+	def connectCells(self, pre_branches, post_branches, n_syns, dist):
 		def addInhSynapses(branch, locs, presyn_seg, delay=0, weight=None, threshold=0, Dep=0, Fac=0):
 			'''locs and preysnaptics should be arrays ordered identically, for synapse location on postsynaptic branch (locs) and
 			presynaptic partner (presynaptics)
@@ -129,18 +129,18 @@ class Population():
 				synapses[-1].gmax 	= 0.001 # don't touch - weight conversion factor to (us) (later multiplied by the conductance in nS)
 
 				netcons[-1].weight[0] = weight # In units nS
-				netcons[-1].delay 	 = delay
+				netcons[-1].delay 	  = delay
 				netcons[-1].threshold = threshold
 
 			return synapses, netcons
 
-		def synLocations(L, density, dist):
+		def synLocations(L, n_syns, dist):
 			"""
 			Returns synapse location according to given distribution, in arbitrary units (fraction [0-1]).
 			Arbitrary units (relative to branch length) is the way NEURON receives synapse locations.
 			"""
 			ok = 0
-			n_syns = int(np.ceil(density * L))	
+			density = n_syns / L
 
 			while not ok:
 				if dist == 'uniform':
@@ -180,7 +180,7 @@ class Population():
 		# Assuming locs and presynaptic stim_axons have been determined and put into self.connections dict
 		for branch in self.connections:
 			branch_obj = [i for i in post_branches if branch in i.name()][0]
-			self.connections[branch]['locs'] 			= synLocations(branch_obj.L, density, dist)
+			self.connections[branch]['locs'] 			= synLocations(branch_obj.L, n_syns, dist)
 			self.connections[branch]['stim_axon_segs'] 	= pre_branches
 			# Think about weight, delay (synaptic), threshold and noise (stochastic firing)
 			
@@ -280,9 +280,7 @@ class Population():
 			return branch_locs
 
 		def addExcSynapses(contact_locs_dict, stim_times, delay=0, weight=None, threshold=0, Dep=0, Fac=0):
-			# contact_locs_dict = {branch_name: {'locs': [locs], 'branch_obj': branch_obj}}
-
-			print('* \nThese synapses are without depression. Find synapses with! *')
+			# contact_locs_dict = {branch_name: {'locs': [locs], 'branch_obj': branch_obj}}			
 
 			synapses, netcons, events = [], [], []
 
@@ -301,8 +299,8 @@ class Population():
 				netcons[-1].weight[0] = weight
 
 				# Custom initialization: insert event to queue (if h.FInitializeHandler no called, event is erased by h.run() because it clears the queue)
-				for time in stim_times:
-					events.append(h.FInitializeHandler('nrnpython("netcons[-1].event({})")'.format(time+delay)))
+				# for time in stim_times:
+				# 	events.append(h.FInitializeHandler('nrnpython("netcons[-1].event({})")'.format(time+delay)))
 
 			return synapses, netcons, events
 
@@ -317,188 +315,43 @@ class Population():
 		thalamic_activations = processData(thalamic_activations_filename)
 
 		# For the given cell, find: presynaptic thalamic GIDs, no. of contacts each one makes and their activation timings
-		print('Finding presynaptic contacts for cell {}'.format(cell_name))
+		print('\n- Finding presynaptic contacts for cell {}'.format(cell_name))
 		cell_inputs = getInputs(cell_gid, thalamic_activations, thalamic_connections_filename)
 		
 		# Add thalamic activation as synapses to cell
 		cell_obj 	 = self.cells[cell_name]['cell']
-		branches 	 = self.cells[cell_name]['dendrites']
+		# branches 	 = self.cells[cell_name]['basal_dendrites']
+		branches = [self.cells[cell_name]['cell'].soma[0]]
 
 		# CHECK THIS!
-		print('Adding thalamo-cortical synapses and creating activation events')		
+		print('\n- Adding thalamo-cortical synapses (on BASAL dendrites) and creating activation events')
+		print('\n* WARNING: These synapses are without depression. Find synapses with! *')	
+		self.inputs[cell_name] = {}	
 		for thal_gid in cell_inputs:
 			n_syns 		= cell_inputs[thal_gid]['contacts']
 			stim_times 	= cell_inputs[thal_gid]['times']
 
 			contact_locs_dict = synLocationsAll(branches, n_syns)
 
-			print('\nNow all contacts are in one synapses! Check if contacts should affect weight or be different contacts in different locations')
-
 			temp_synapses, temp_netcons, _ = addExcSynapses(contact_locs_dict, stim_times, delay=0, 
 																							weight=0.4, 
 																							threshold=0, 
 																							Dep=0, Fac=0)				
-			self.inputs[cell_name]['thalamic_gid_{}'.format(thal_gid)]['synapses']  = temp_synapses
-			self.inputs[cell_name]['thalamic_gid_{}'.format(thal_gid)]['netcons']   = temp_netcons
+			self.inputs[cell_name]['thalamic_gid_{}'.format(thal_gid)] = {}
+			self.inputs[cell_name]['thalamic_gid_{}'.format(thal_gid)]['synapses']   = temp_synapses
+			self.inputs[cell_name]['thalamic_gid_{}'.format(thal_gid)]['netcons']    = temp_netcons
+			self.inputs[cell_name]['thalamic_gid_{}'.format(thal_gid)]['stim_times'] = stim_times
+			self.inputs[cell_name]['thalamic_gid_{}'.format(thal_gid)]['locations']  = contact_locs_dict
 
 
-	def OLD_addInput(self, cell, mode, n_axons, n_contacts_per_axon, frac_standard_axons = 0.5, filename=''):
-		"""
-		Add presynaptic synapses. The mode variable determines where the synaptic information is taken from.
-
-		- BB / EPFL: In the EPFL downloaded files there are cortico-cortical synapses.
-		- thalamic: I should make thalamic synapses for PV
-		"""
-		def checkValidFilename(filename, cond='', which_standard=None):	
-			ok = 0	
-			while not ok:
-
-				# This bloc is inside the while loop because condition should change according to new filename
-				if cond == 'exist':
-					condition = 'not \'%s\''%filename		
-				elif cond == 'in_dir':
-					condition = '\'%s\' not in os.listdir()'%filename
-				else:
-					print('Filename validity check not provided with condition, exiting...')
-					return filename
-
-				if eval(condition):
-					filename = input('Oops, file not %s!\nEnter valid thalamic input file name with ext. (current dir: %s): '%(cond, os.getcwd()))
-				else:
-					ok = 1
-
-			return filename
-
-		def divideStandardDeviant(filename, which_standard, n_axons, frac_standard_axons):
-
-			stim_times = cPickle.load(open(filename, 'rb'))[which_standard]
-			for i in stim_times:
-				if i[1] != which_standard:
-					which_deviant = i[1]
-					break
-			
-			standard_times = [i[0] for i in stim_times if i[1]==which_standard] 
-			deviant_times  = [i[0] for i in stim_times if i[1]==which_deviant] 
-			
-			# Sanity check:
-			if (len(standard_times)+len(deviant_times)) != len(stim_times):
-				print('Wrong division of stim times!')
-				pdb.set_trace()
-
-			n_standards = int(n_axons * frac_standard_axons)
-			n_deviants = n_axons - n_standards
-			
-
-			return standard_times, deviant_times, n_standards, n_deviants
-
-		def synLocationsAll(branches, n_syns):
-
-			branch_locs = {b: [] for b in branches}
-			n_branches = len(branches)
-				
-			# Select branch and location at random
-			for i in range(n_syns):
-				rand_branch_idx = np.random.randint(n_branches)
-				rand_branch 	= branches[rand_branch_idx]
-				rand_loc 		= np.random.rand()
-				
-				branch_locs[rand_branch].append(rand_loc)
-
-			# Delete un-synapsed branches from dict
-			for key in list(branch_locs.keys()):
-				if len(branch_locs[key]) == 0:
-					del branch_locs[key]
-
-			return branch_locs
-
-		def addExcSynapses(branches, locs, stim_times, delay=0, weight=None, threshold=0, Dep=0, Fac=0):
-			# How to separate deviant from standard? Is it separate axons that respond to each?
-			# Is there a way to specify timings to single netstim or should I do different netstim for each timing?
-			# Should I do 1 netstim for all synapses responding to same tone? Or is it not exact spike timings?
-			# Do 1 netstim for all the synapses from the same axon
-			print('*\nAssuming different axons respond to each tone*')
-			print('*\nAssuming each spike is exactly at spike time (synchronized->noise=0)*')
-			print('*\nAssuming different axons respond to each tone*')
-			print('* \nThese synapses are without depression. Find synapses with! *')
-			_ = messagebox.showinfo(message='Assuming different axons respond to each tone')
-
-			n_syns = len(locs)
-			synapses, netstims, netcons = [], [], []
-
-			# Create synapse
-			for branch in locs:
-				# cur_sec = [b for b in branches if branch in b.name()] # OLD - when branch (key of locs dict) was branch_name
-				synapses.append(h.ProbAMPANMDA2_RATIO(loc, sec=branch))
-				synapses[-1].Dep = Dep
-				synapses[-1].Fac = Fac
-
-			# One Netstim for each spike time (I checked- it is possible)
-			for time in stim_times:
-				netstims.append(h.NetStim())
-				netstims[-1].number = 1
-				netstims[-1].start  = time
-				netstims[-1].noise  = 0
-
-				# Connect NetStim to all synapses
-				for syn in synapses:
-					netcons.append(netstims[-1], syn)
-					netcons[-1].weight[0] = weight
-					netcons[-1].delay 	  = delay
-					netcons[-1].threshold = threshold
-
-			return synapses, netstims, netcons
 
 
-		for cell in self.cells:
-			cell_obj 	 = self.cells[cell]['cell']
-			branches 	 = self.cells[cell]['dendrites']
-			# branch_names = [i.name().split('].')[-1] for i in branches]
-
-			if mode=='BB' or mode=='EPFL' or mode=='epfl':
-				original_path = os.getcwd()	
-				os.chdir(self.template_path) # Change to path including synapse files so synapse.hoc can load them
-
-				print('Loading cortico-cortical synapses from EPFL!')
-				cell_obj.load_synapses()
-
-				os.chdir(original_path)
-			
-			elif mode=='thalamic':
-				print('Creating thalamic synapses!')
-
-				# Check filename is valid
-				filename = checkValidFilename(filename, cond='exist')
-				filename = checkValidFilename(filename, cond='in_dir')
-
-				# Split inputs by tone
-				self.inputs[cell] = {'standard': {}, 'deviant': {}}
-				standard_times, deviant_times, n_standards, n_deviants = divideStandardDeviant(filename, 
-																							   which_standard, 
-																							   n_axons, 
-																							   frac_standard_axons)				
-
-				# Synapses responding to standard tones
-				standard_locs = synLocationsAll(branches, n_standards) # synapse locations on all branches {branch_obj: [locs]}
-				print('\n*Sanity check: check that synapsed branches are consistent with standard_locs dict*\n'); pdb.set_trace()
-				temp_synapses, temp_netstims, temp_netcons = addExcSynapses(standard_locs,standard_times,
-																			delay=0, weight=None, 
-																			threshold=0, Dep=0, Fac=0)				
-				self.inputs[cell]['standard']['synapses']  = temp_synapses
-				self.inputs[cell]['standard']['netstims']  = temp_netstims
-				self.inputs[cell]['standard']['netcons']   = temp_netcons
-				
-				# Synapses responding to deviant tones
-				deviant_locs = synLocationsAll(branches, n_deviants) # synapse locations on all branches
-				# deviant_branches = [b for b in branches if b.name().splot('].')[-1] in deviant_locs] - OLD
-				temp_synapses, temp_netstims, temp_netcons = addExcSynapses(deviant_locs, deviant_times,
-																			delay=0, weight=None, 
-																			threshold=0, Dep=0, Fac=0)
-				self.inputs[cell]['deviant']['synapses']   = temp_synapses
-				self.inputs[cell]['deviant']['netstims']   = temp_netstims
-				self.inputs[cell]['deviant']['netcons']    = temp_netcons
 
 
-				print('Thalamic input under construction! \
-					\n* Make each thalamic gid correspond to a single netstim- connect all synapsesfrom gid to this netstim *')
-				_ = messagebox.showinfo(message='Thalamic input under construction!')		
-	
+
+
+
+
+
+
+

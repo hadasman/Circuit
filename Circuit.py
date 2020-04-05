@@ -5,18 +5,307 @@ import numpy as np
 from neuron import gui, h
 import pdb, os, sys
 import matplotlib.pyplot as plt
+plt.ion()
 from Population import Population
+from Stimulus import Stimulus
 from math import log
-
+import _pickle as cPickle
 os.chdir('../MIT_spines')
 from Cell import Cell
 os.chdir('../Circuit')
 
-cell_details_filename		='thalamocortical_Oren/thalamic_data/cells_details.pkl'
-thalamic_locs_filename		='thalamocortical_Oren/thalamic_data/thalamic_axons_location.pkl'
-thal_connections_filename 	= 'thalamocortical_Oren/thalamic_data/thalamo_cortical_connectivity.pkl'
-
 # ============================================  Define Functions & Constants  ============================================
+cell_details_filename		  		= 'thalamocortical_Oren/thalamic_data/cells_details.pkl'
+thalamic_locs_filename		  		= 'thalamocortical_Oren/thalamic_data/thalamic_axons_location_by_gid.pkl'
+thal_connections_filename 	  		= 'thalamocortical_Oren/thalamic_data/thalamo_cortical_connectivity.pkl'
+thalamic_activations_6666_filename 	= 'thalamocortical_Oren/SSA_spike_times/input6666_106746.dat'
+thalamic_activations_9600_filename 	= 'thalamocortical_Oren/SSA_spike_times/input9600_109680.dat'
+pyr_connectivity_filename  	  		= 'thalamocortical_Oren/pyramidal_connectivity_num_connections.p'
+cell_type_gids_filename		  		= 'thalamocortical_Oren/thalamic_data/cell_type_gids.pkl'
+
+thalamic_locations = pd.read_pickle(thalamic_locs_filename)
+
+def getChosenGIDs(pyr_gids, PV_gids, freq1, freq2, min_freq=4000, df_dx=3.5, thalamic_locs_filename=thalamic_locs_filename, cell_details_filename=cell_details_filename, pyr_connectivity_filename=pyr_connectivity_filename):
+	# df/dx is n units [octave/mm]
+	thalamic_locations   = pd.read_pickle(thalamic_locs_filename)
+	cell_details 	 	 = pd.read_pickle(cell_details_filename)
+	all_pyr_connectivity = pd.read_pickle(pyr_connectivity_filename)
+	
+	min_freq_loc 	 = min(thalamic_locations.x) 
+
+	def get_AxonLoc(freq, min_freq, min_freq_loc, df_dx=df_dx):
+
+		dOctave = log(freq / min_freq, 2) # In octaves
+		d_mm =  dOctave / df_dx			  # In millimeters
+		d_microne = d_mm * 1000 # In micrones
+		freq_loc = min_freq_loc + d_microne
+
+		return freq_loc
+
+	def get_pyramidal(pyr_gids, freq1_loc, freq2_loc, cell_details):		
+		mid_loc   = np.mean([freq1_loc, freq2_loc])
+
+		dists = [abs(cell_details.loc[gid].x-mid_loc) for gid in pyr_gids]	
+		sorted_idx = [dists.index(i) for i in sorted(dists)]	
+
+		chosen_pyr_gid = pyr_gids[sorted_idx[0]]
+		return chosen_pyr_gid
+
+	def get_PVs(PV_gids, chosen_pyr_gid, all_pyr_connectivity):
+
+		pyr_connectivity = all_pyr_connectivity[chosen_pyr_gid]
+
+		chosen_PV_gids = []
+		for gid in pyr_connectivity:
+			if int(gid) in PV_gids:
+				chosen_PV_gids.append([int(gid), pyr_connectivity[gid]])
+
+		return chosen_PV_gids
+
+	freq1_loc = get_AxonLoc(freq1, min_freq, min_freq_loc)
+	freq2_loc = get_AxonLoc(freq2, min_freq, min_freq_loc)
+	
+	# Pyramidal
+	chosen_pyr_gid = get_pyramidal(pyr_gids, freq1_loc, freq2_loc, cell_details)
+
+	# PV
+	chosen_PV_gids = get_PVs(PV_gids, chosen_pyr_gid, all_pyr_connectivity)
+
+	return chosen_pyr_gid, chosen_PV_gids
+
+def RunSim(Pyr_pop, PV_pop, v_init=-75, tstop=154*1000):
+	# Oren's simulation length is 154 seconds, I leave some time for last inputs to decay
+	t = h.Vector()
+	t.record(h._ref_t)
+	h.tstop = tstop
+
+	h.v_init = v_init
+
+	# IMPORTANT NOTIC: MUST be defined in the same level as h.run() is called (inside same function of ourside of any function) or else hoc doesn't recognize netcon name!
+	# pyr_events = []
+	# for axon in Pyr_pop.inputs['Pyr0']:
+	# 	stim_times = Pyr_pop.inputs['Pyr0'][axon]['stim_times']
+	# 	for con in Pyr_pop.inputs['Pyr0'][axon]['netcons']:					
+	# 		for time in stim_times:
+	# 			pyr_events.append(h.FInitializeHandler('nrnpython("con.event({})")'.format(time+delay)))
+
+	# PV_events = []
+	# for PV_cell_name in PV_pop.inputs:
+	# 	for axon in PV_pop.inputs[PV_cell_name]:
+	# 		stim_times = PV_pop.inputs[PV_cell_name][axon]['stim_times']
+	# 		for CON in PV_pop.inputs[PV_cell_name][axon]['netcons']:		
+	# 			for time in stim_times:
+	# 				PV_events.append(h.FInitializeHandler('nrnpython("CON.event({})")'.format(time+delay)))
+
+	h.finitialize()
+	h.run()
+
+	_, (ax1, ax2, ax3) = plt.subplots(3, 1)
+
+	PYR_cell = Pyr_pop.cells['Pyr0']['cell']
+	ax1.plot(t, PYR_cell.soma_v)
+	ax1.set_title('Pyramidal soma voltage')
+	ax1.set_xlabel('Time (ms)')
+	ax1.set_ylabel('Voltage (mV)')
+
+	for cell in PV_pop.cells:
+		ax2.plot(t, PV_pop.cells[cell]['soma_v'], label=cell)
+	ax2.set_title('PV soma coltage')
+	ax2.set_xlabel('Time (ms)')
+	ax2.set_ylabel('Voltage (mV)')
+
+	return PYR_cell, PV_pop
+
+pyr_template_path 	= 'EPFL_models/L4_PC_cADpyr230_1' # '../MIT_spines/cell_templates'
+pyr_template_name 	= 'cADpyr230_L4_PC_f15e35e578' # 'whole_cell'
+# pyr_morph_filename 	= 'dend-C170897A-P3_axon-C260897C-P4_-_Clone_4.asc' # 'cell1.asc'
+pyr_morph_path 		= '{}/morphology'.format(pyr_template_path) # 'L5PC/'
+
+PV_template_path 	= 'EPFL_models/L4_LBC_cNAC187_1'
+PV_template_name 	= 'cNAC187_L4_LBC_990b7ac7df'
+# PV_morph_filename 	= 'C050398B-I4_-_Clone_3.asc'
+PV_morph_path 		= '{}/morphology/'.format(PV_template_path)
+
+pyr_type = 'L4_PC'
+PV_type = 'L4_LBC'
+n_VIP 		  = 5
+
+delay = 0# TEMPORARY: CHANGE THIS
+freq1 = 6666
+freq2 = 9600
+activated_filename = thalamic_activations_6666_filename
+activated_standard_freq = freq1*(str(freq1) in activated_filename) + freq2*(str(freq2) in activated_filename)
+
+# ===============================================  Choose GIDs  ===============================================
+print('\n========== Choosing GIDs from BlueBrain Database (pyramidal between {}Hz and P{}Hz) =========='.format(freq1, freq2))
+
+cell_type_gids 	= cPickle.load(open(cell_type_gids_filename,'rb'))     
+pyr_GIDs 		= cell_type_gids[pyr_type]
+PV_GIDs 		= cell_type_gids[PV_type]
+
+chosen_pyr, chosen_PV = getChosenGIDs(pyr_GIDs, PV_GIDs, freq1, freq2) # chosen_pyr==gid, chosen_V==[[gid, no_contancts],...]
+
+# ===============================================  Create Cell Populations  ===============================================
+
+print('\n========== Creating pyramidal cell ==========')
+Pyr_pop = Population('Pyr', pyr_morph_path, pyr_template_path, pyr_template_name)
+Pyr_pop.addCell()
+
+print('\n========== Creating PV population ==========')
+n_PV  		  = len(chosen_PV)
+PV_pop = Population('PV', PV_morph_path, PV_template_path, PV_template_name)
+for i in range(n_PV):
+	PV_pop.addCell()
+
+# ==============================================  Stimulus Analysis  ==============================================
+# !! THINK if i can use the activations here (self.thalamic_activations) for the Population.addInput!
+
+stimuli = {}
+connecting_gids = []
+thal_connections = pd.read_pickle(thal_connections_filename)
+
+# Find thalamic GIDs connecting the the pyramidal cell
+for con in thal_connections.iterrows():
+	if con[1].post_gid == chosen_pyr:
+		connecting_gids.append(con[1].pre_gid) # [presynaptic gid, no. of contacts]
+stimuli[freq1] = Stimulus(freq1, freq2, 'thalamocortical_Oren/SSA_spike_times/stim_times.p', thalamic_activations_6666_filename, axon_gids=connecting_gids)
+stimuli[freq2] = Stimulus(freq2, freq1, 'thalamocortical_Oren/SSA_spike_times/stim_times.p', thalamic_activations_9600_filename, axon_gids=connecting_gids)
+
+plot_thalamic_responses = False
+if plot_thalamic_responses:
+
+	stim_ax = stimuli[freq1].axonResponses(thalamic_locations, color='red')
+	stim_ax = stimuli[freq2].axonResponses(thalamic_locations, color='blue', h_ax=stim_ax)
+
+	stimuli[freq1].tonotopic_location(thalamic_locations, color='red', h_ax=stim_ax)
+	stimuli[freq2].tonotopic_location(thalamic_locations, color='blue', h_ax=stim_ax)
+
+	stim_ax.set_title('Thalamic Axons (Connected to Chosen Pyramidal) Firing Rate for 2 Frequencies\nPyramidal GID: {}, Spontaneous Axon FR: {}'.format(chosen_pyr, 0.5))
+	stim_ax.set_xlim([65, 630])
+
+# ==============================================  Connect Populations with Synapses and Inputs  ==============================================
+
+print('\n========== Connecting thalamic inputs to PV (standard: {}Hz) =========='.format(activated_standard_freq))
+for i, PV_cell_name in enumerate(PV_pop.cells):
+	PV_gid = chosen_PV[i][0]
+
+	PV_pop.addInput(PV_cell_name, PV_gid, thalamic_activations_filename=activated_filename, thalamic_connections_filename=thal_connections_filename)
+	PV_events = [] 
+	for axon in PV_pop.inputs[PV_cell_name]:
+		stim_times = PV_pop.inputs[PV_cell_name][axon]['stim_times']
+		for con in PV_pop.inputs[PV_cell_name][axon]['netcons']:	
+			for time in stim_times:
+				PV_events.append(h.FInitializeHandler('nrnpython("PV_pop.inputs[\'PV0\'][\'{}\'][\'netcons\'][{}].event({})")'.format(axon, i, time+delay)))
+
+print('\n========== Connecting thalamic inputs to Pyramidal cell (standard: {}Hz) =========='.format(activated_standard_freq))
+Pyr_pop.addInput(list(Pyr_pop.cells.keys())[0], chosen_pyr, thalamic_activations_filename=activated_filename, thalamic_connections_filename=thal_connections_filename)
+# IMPORTANT NOTIC: MUST be defined outside of functino or else hoc doesn't recognize netcon name!
+pyr_events = []
+for axon in Pyr_pop.inputs['Pyr0']:
+	stim_times = Pyr_pop.inputs['Pyr0'][axon]['stim_times']
+	for i in range(len(Pyr_pop.inputs['Pyr0'][axon]['netcons'])):		
+		for time in stim_times:
+			pyr_events.append(h.FInitializeHandler('nrnpython("Pyr_pop.inputs[\'Pyr0\'][\'{}\'][\'netcons\'][{}].event({})")'.format(axon, i, time+delay)))
+
+
+print('Connecting PV population to Pyramidal cell')
+PV_pop.connectCells([PV_pop.cells['PV0']['cell'].axon[1](1)]*3, [PYR_cell.cell.soma[0]], PV_density, PV_dist) # Adds self.connections to Population
+print('\n***Assuming isopotential soma and perisomatic PV connections: all PV synapses are placed on soma(0.5)')
+
+'''
+from neuron import h,gui
+import matplotlib.pyplot as plt
+dend=h.Section('dend')
+dend.insert('pas')
+h.v_init = dend.e_pas
+syn1 = h.ProbAMPANMDA2_RATIO(dend(0.5))
+NET1 = h.NetCon(None, syn1)
+NET1.weight[0]=0.4
+time1 = 50
+syn2 = h.ProbAMPANMDA2_RATIO(dend(0.2))
+NET2 = h.NetCon(None, syn2)
+NET2.weight[0]=0.4
+time2 = 100
+times = [time1, time2]
+NETS = [NET1, NET2]
+events = []
+for i in range(len(NETS)):
+	T = times[i]
+	print('time: {}, con: {}'.format(T, NETS[i]))
+	events.append(h.FInitializeHandler('nrnpython("NETS[{}].event({})")'.format(i, T)))
+h.tstop=500;t=h.Vector();t.record(h._ref_t)
+v=h.Vector();v.record(dend(0.5)._ref_v) 
+h.run();plt.plot(t,v)  
+
+
+events2 = []
+syn3 = h.ProbAMPANMDA2_RATIO(dend(0.5))
+NET3 = h.NetCon(None, syn3)
+NET3.weight[0]=0.4
+time3 = 300
+syn4 = h.ProbAMPANMDA2_RATIO(dend(0.2))
+NET4 = h.NetCon(None, syn4)
+NET4.weight[0]=0.4
+time4 = 400
+times2 = [time3, time4]
+NETS2 = [NET3, NET4]
+for con in NETS2:
+	T = times2[NETS2.index(con)]
+	print('time: {}, con: {}'.format(T, con))
+	events2.append(h.FInitializeHandler('nrnpython("con.event({})")'.format(T)))
+h.tstop=500;t=h.Vector();t.record(h._ref_t)
+v=h.Vector();v.record(dend(0.5)._ref_v) 
+h.run();plt.plot(t,v)  
+
+
+
+
+
+
+
+
+
+for axon in ['thalamic_gid_221076', 'thalamic_gid_221082']:
+	stim_times = Pyr_pop.inputs['Pyr0'][axon]['stim_times']
+	for i in range(2):
+		for time in stim_times:
+			pyr_events.append(h.FInitializeHandler('nrnpython("Pyr_pop.inputs[\'Pyr0\'][\'{}\'][\'netcons\'][{}].event({})")'.format(axon, i, time+delay)))
+
+
+
+pyr_events = []
+for axon in ['thalamic_gid_221076', 'thalamic_gid_221082']:
+	stim_times = Pyr_pop.inputs['Pyr0'][axon]['stim_times']
+	for con in Pyr_pop.inputs['Pyr0'][axon]['netcons'][:2]:
+		for time in stim_times:
+			pyr_events.append(h.FInitializeHandler('nrnpython("con.event({})")'.format(time+delay)))
+'''
+'''
+def event_python_function(): #for this to work you must name every variable differently (i.e. time1, time2, etc..  or stim_times[i] inside function)
+	global current_netcon, current_time, delay
+	current_netcon.event(current_time+delay) 
+
+'''
+'''
+cvode = h.CVode()
+temp_vec = h.Vector()
+cvode.spike_stat(temp_vec)
+n_NetCons = int(temp_vec.x[1])
+events = []
+for i in range(n_NetCons):
+	events.append(h.FInitializeHandler('nrnpython("NetCon[{}].event({})")'.format(i, time+delay)))
+'''
+
+# ==============================================  Run Simulation & Plot Results  ==============================================
+PYR_cell, PV_pop = RunSim(PYR_cell, PV_pop)
+
+# ==============================================  Morphology Visualization  ==============================================
+
+for i in range(n_PV):  
+	PV_pop.moveCell(PV_pop.cells['PV{}'.format(i)]['cell'], (i*350)-(100*(n_PV+1)), -500, 0)  
+
+
+# ==============================================  Connectivity Analysis  ==============================================
 def analyzeConnectivityFromThalamus(which_layer, which_mtype, cell_details_filename=cell_details_filename, thal_connections_filename=thal_connections_filename):
 
 	cell_details = pd.read_pickle(cell_details_filename)
@@ -53,83 +342,6 @@ def analyzeConnectivityFromThalamus(which_layer, which_mtype, cell_details_filen
 
 	return stats
 
-def getGIDs(pyr_type, PV_type):
-	
-	cell_details = pd.read_pickle(cell_details_filename)
-	pyr_gids, PV_gids = [], []
-
-	for i in range(len(cell_details)): 
-
-		if cell_details.iloc[i].mtype==pyr_type:
-			pyr_gids.append(cell_details.index[i])
-		elif cell_details.iloc[i].mtype==PV_type:
-			PV_gids.append(cell_details.index[i])
-
-	return pyr_gids, PV_gids
-
-def getPyramidalGID(pyr_gids, freq1, freq2, min_freq=4000, df_dx=3.5, cell_details_filename=cell_details_filename, thalamic_locs_filename=thalamic_locs_filename):
-	# df/dx is n units [octave/mm]
-
-	thalamic_locs = pd.read_pickle(thalamic_locs_filename)
-	cell_details = pd.read_pickle(cell_details_filename)
-	min_freq_loc = min(thalamic_locs.x) 
-
-	def get_AxonLoc(freq, min_freq, min_freq_loc, df_dx=df_dx):
-
-		dOctave = log(freq / min_freq, 2) # In octaves
-		d_mm =  dOctave / df_dx			  # In millimeters
-		freq_loc = min_freq_loc + d_mm
-
-		return freq_loc
-
-	freq1_loc = get_AxonLoc(freq1, min_freq, min_freq_loc)
-	freq2_loc = get_AxonLoc(freq2, min_freq, min_freq_loc)
-	mid_loc   = np.mean([freq1_loc, freq2_loc])
-
-	cur_min_dist = 100
-	for gid in pyr_gids:
-		if abs(mid_loc - cell_details.loc[gid].x) < cur_min_dist:
-			cur_min_dist = abs(mid_loc - cell_details.loc[gid].x)
-			cur_gid = gid
-
-	return cur_gid
-
-def RunSim(PYR_cell, PV_pop, VIP_pop, v_init=-75, tstop=170*60):
-	# Oren's simulation length is 154 seconds, I leave some time for last inputs to decay
-	t = h.Vector()
-	t.record(h._ref_t)
-	h.tstop = tstop
-
-	h.v_init = v_init
-
-	h.finitialize()
-	h.run()
-
-	_, (ax1, ax2, ax3) = plt.subplots(3, 1)
-
-	ax1.plot(t, PYR_cell.soma_v)
-	ax1.set_title('Pyramidal soma voltage')
-	ax1.set_xlabel('Time (ms)')
-	ax1.set_ylabel('Voltage (mV)')
-
-	for cell in PV_pop.cells:
-		ax2.plot(t, PV_pop.cells[cell]['soma_v'], label=cell)
-	ax2.set_title('PV soma coltage')
-	ax2.set_xlabel('Time (ms)')
-	ax2.set_ylabel('Voltage (mV)')
-
-	return PYR_cell, PV_pop, VIP_pop
-
-pyr_template_path 	= 'EPFL_models/L23_PC_cADpyr229_1' # '../MIT_spines/cell_templates'
-pyr_template_name 	= 'cADpyr229_L23_PC_5ecbf9b163' # 'whole_cell'
-pyr_morph_filename 	= 'dend-C170897A-P3_axon-C260897C-P4_-_Clone_4.asc' # 'cell1.asc'
-pyr_morph_path 		= '{}/morphology'.format(pyr_template_path) # 'L5PC/'
-
-PV_template_path 	= 'EPFL_models/L23_LBC_cNAC187_1'
-PV_template_name 	= 'cNAC187_L23_LBC_df15689e81'
-PV_morph_filename 	= 'C050398B-I4_-_Clone_3.asc'
-PV_morph_path 		= '{}/morphology/'.format(PV_template_path)
-
 # thalamo_to_pyr_stats = analyzeConnectivityFromThalamus('L23', 'PC')
 # thalamo_to_PV_stats  = analyzeConnectivityFromThalamus('L23', 'LBC')
 
@@ -141,16 +353,9 @@ PV_morph_path 		= '{}/morphology/'.format(PV_template_path)
 # n_contacts_to_pyr = thalamo_to_pyr_stats['per_cell']['mean_incoming_contacts']
 # n_contacts_to_PV  = thalamo_to_PV_stats['per_cell']['mean_incoming_contacts']
 
-pyr_type = 'L4_PC'
-PV_type = 'L23_LBC'
-n_PV  		  = 4
-PV_density	  = 0.1 # Density of synapses from PV to pyramidal
-PV_dist 	  = 'one'
 
-n_VIP 		  = 5
-# VIP_density	  = ... # ?Density of synapses from VIP to pyramidal or PV?
 
-# ===============================================  Create Cell Populations  ===============================================
+
 '''
 GENERAL- EPFL cell models:
 	- Template: under the name template.py. In the template the morphology is loaded, biophys() is called and 
@@ -186,48 +391,9 @@ Pyramidal cell:
 	! Make sure my biophys is like Itay Hay's !
 '''
 
-print('# Creating PV population')
-PV_pop = Population('PV', PV_morph_path, PV_morph_filename, PV_template_path, PV_template_name)
-for i in range(n_PV):
-	PV_pop.addCell()
-
-print('# Creating pyramidal cell')
-Pyr_pop = Population('Pyr', pyr_morph_path, pyr_morph_filename, pyr_template_path, pyr_template_name)
-Pyr_pop.addCell()
-
-'''
-PYR_cell = Cell(pyr_morph_path, 'pyr', pyr_morph_filename, pyr_template_name, pyr_template_path, verbose=False)
-PYR_cell.loadMorph()
-
-PYR_branches = [a for a in PYR_cell.cell.apic] + [d for d in PYR_cell.cell.dend]
-PYR_cell.soma_v = h.Vector()
-PYR_cell.soma_v.record(PYR_cell.cell.soma[0](0.5)._ref_v)
-'''
-
-# ==============================================  Connect Populations with Synapses and Inputs  ==============================================
-
-pyr_GIDs, PV_GIDs = getGIDs(pyr_type, PV_type)
-print('\nConnecting thalamic inputs to PV')
-for i, PV_cell_name in enumerate(PV_pop.cells):
-	PV_gid = PV_GIDs[i+10]
-	PV_pop.addInput(PV_cell_name, PV_gid, thalamic_activations_filename="thalamocortical_Oren/SSA_spike_times/input6666_106746.dat", thalamic_connections_filename=thal_connections_filename)
-
-print('Connecting thalamic inputs to Pyramidal cell')
-pyr_gid = getPyramidalGID(pyr_GIDs, 6000, 9600)
-Pyr_pop.addInput(list(Pyr_pop.cells.keys())[0], pyr_gid, thalamic_activations_filename="thalamocortical_Oren/SSA_spike_times/input6666_106746.dat", thalamic_connections_filename=thal_connections_filename)
-
-print('Connecting PV population to Pyramidal cell')
-PV_pop.connectCells([PV_pop.cells['PV0']['cell'].axon[1](1)]*3, [PYR_cell.cell.soma[0]], PV_density, PV_dist) # Adds self.connections to Population
-print('\n***Assuming isopotential soma and perisomatic PV connections: all PV synapses are placed on soma(0.5)')
-
-# ==============================================  Run Simulation & Plot Results  ==============================================
-PYR_cell, PV_pop, VIP_pop = RunSim(PYR_cell, PV_pop, VIP_pop)
-
-# ==============================================  Morphology Visualization  ==============================================
 
 
-for i in range(n_PV):  
-	PV_pop.moveCell(PV_pop.cells['PV{}'.format(i)]['cell'], i*300, -700, 0)  
+
 
 
 '''
