@@ -12,6 +12,8 @@ from math import log
 import _pickle as cPickle
 os.chdir('../Circuit')
 from tqdm import tqdm
+from scipy.stats import ttest_ind
+from Connectivity import Connectivity
 
 # ============================================  Define Functions & Constants  ============================================
 '''
@@ -24,7 +26,8 @@ def initializeParameters():
 	global pyr_template_path, pyr_template_name, pyr_morph_path
 	global PV_template_path, PV_template_name, PV_morph_path
 	global PV_input_weight, PV_to_Pyr_weight, Pyr_input_weight
-	global pyr_type, not_PVs, PV_input_delay, Pyr_input_delay, PV_output_delay, freq1, freq2, simulation_time, spike_threshold
+	global pyr_type, not_PVs, SOM_types
+	global PV_input_delay, Pyr_input_delay, PV_output_delay, freq1, freq2, simulation_time, spike_threshold
 	global filenames, cell_type_gids, thal_connections, thalamic_locations
 
 	pyr_template_path 	= 'EPFL_models/L4_PC_cADpyr230_1' # '../MIT_spines/cell_templates'
@@ -41,6 +44,7 @@ def initializeParameters():
 
 	pyr_type = 'L4_PC'
 	not_PVs = ['PC', 'SP', 'SS', 'MC', 'BTC', 'L1']
+	SOM_types = ['MC']
 
 	PV_input_delay 	= 0 # TEMPORARY: CHANGE THIS
 	Pyr_input_delay = PV_input_delay+1 # TEMPORARY: CHECK THIS
@@ -53,18 +57,22 @@ def initializeParameters():
 	filenames = {'cell_details': 'thalamocortical_Oren/thalamic_data/cells_details.pkl', 
 			 'thalamic_locs': 'thalamocortical_Oren/thalamic_data/thalamic_axons_location_by_gid.pkl',
 			 'thalamic_connections': 'thalamocortical_Oren/thalamic_data/thalamo_cortical_connectivity.pkl',
-			 'thalamic_activations_6666': 'thalamocortical_Oren/SSA_spike_times/input6666_106746.dat',
-			 'thalamic_activations_9600': 'thalamocortical_Oren/SSA_spike_times/input9600_109680.dat',
+			 'thalamic_activations_6666': 'thalamocortical_Oren/SSA_spike_times/input6666_artificial.p',
+			 # 'thalamic_activations_6666': 'thalamocortical_Oren/SSA_spike_times/input6666_successes_by_gid.p',
+			 # 'thalamic_activations_9600': 'thalamocortical_Oren/SSA_spike_times/input9600_109680.p',
+			 'thalamic_activations_9600': 'thalamocortical_Oren/SSA_spike_times/input9600_by_gid.p',
 			 'pyr_connectivity': 'thalamocortical_Oren/pyramidal_connectivity_num_connections.p',
+			 'cortex_connectivity': 'thalamocortical_Oren/cortex_connectivity_num_connections.p',       
 			 'cell_type_gids': 'thalamocortical_Oren/thalamic_data/cell_type_gids.pkl',
 			 'stim_times': 'thalamocortical_Oren/SSA_spike_times/stim_times.p',
 			 'thalamic_activations': {6666: 'thalamocortical_Oren/SSA_spike_times/input6666_106746.dat', 9600: 'thalamocortical_Oren/SSA_spike_times/input9600_109680.dat'}}
 
-	cell_type_gids 	= cPickle.load(open(filenames['cell_type_gids'],'rb'))     
+	# cell_type_gids 	= cPickle.load(open(filenames['cell_type_gids'],'rb'))     
 	thal_connections = pd.read_pickle(filenames['thalamic_connections'])
 	thalamic_locations = pd.read_pickle(filenames['thalamic_locs'])
 initializeParameters() # Keep here
 
+'''
 def getChosenGIDs(pyr_gids, PV_gids, freq1, freq2, min_freq=4000, df_dx=3.5, filenames=filenames):
 	# df/dx is n units [octave/mm]
 	thalamic_locations   = pd.read_pickle(filenames['thalamic_locs'])
@@ -114,6 +122,7 @@ def getChosenGIDs(pyr_gids, PV_gids, freq1, freq2, min_freq=4000, df_dx=3.5, fil
 	chosen_PV_gids, chosen_PV_n_contacts = get_PVs(PV_gids, chosen_pyr_gid, all_pyr_connectivity)
 
 	return chosen_pyr_gid, chosen_PV_gids, chosen_PV_n_contacts
+'''
 
 def plotThalamicResponses(stimuli, freq1, freq2, thalamic_locations, run_function=False):
 	if run_function:
@@ -153,15 +162,16 @@ activated_filename = filenames['thalamic_activations_6666']
 # activated_filename = filenames['thalamic_activations_9600']
 activated_standard_freq = freq1*(str(freq1) in activated_filename) + freq2*(str(freq2) in activated_filename)
 
-def getResponsiveAxons(standard_freqs, activations_filename, stim_times_filename, simulation_time=simulation_time, cutoff_freq=1.8):
-	def get_activations(activations_filename):
-		temp_data = [i.strip().split() for i in open(activations_filename).readlines()]
-		activations = [] 
-		for i in range(len(temp_data)): 
-			if temp_data[i][0].replace('.', '').isdigit():
-				activations.append([float(temp_data[i][0]), int(float(temp_data[i][1]))]) 
+def get_activations(activations_filename):
+	temp_data = [i.strip().split() for i in open(activations_filename).readlines()]
+	activations = [] 
+	for i in range(len(temp_data)): 
+		if temp_data[i][0].replace('.', '').isdigit():
+			activations.append([float(temp_data[i][0]), int(float(temp_data[i][1]))]) 
 
-		return activations
+	return activations
+
+def getResponsiveAxons(standard_freqs, activations_filename, stim_times_filename, simulation_time=simulation_time, cutoff_freq=1.8):
 
 	stim_times_dict  = pd.read_pickle(stim_times_filename)
 	responses_dict = {}
@@ -170,16 +180,20 @@ def getResponsiveAxons(standard_freqs, activations_filename, stim_times_filename
 
 	for freq in standard_freqs:
 		
-		activations = get_activations(activations_filename[freq])
-		axons = list(set([i[1] for i in activations]))                                                                                  
+		# activations = get_activations(activations_filename[freq])
+		activations = cPickle.load(open(activations_filename, 'rb'))
+		# axons = list(set([i[1] for i in activations]))                                                                                  
+		axons = [i for i in activations]
 
 		total_FRs = {a: {'times': [], 'FR': 0} for a in axons}
 		for a in activations:
-			time = a[0]
-			gid = a[1]
-			total_FRs[gid]['times'].append(time)
-
-
+			# time = a[0]
+			# gid = a[1]
+			# total_FRs[gid]['times'].append(time)
+			gid = a
+			times = activations[a]
+			total_FRs[gid]['times'] = times
+			
 		for gid in axons:
 			total_FRs[gid]['FR'] = len(total_FRs[gid]['times']) / simulation_time_secs
 
@@ -188,39 +202,57 @@ def getResponsiveAxons(standard_freqs, activations_filename, stim_times_filename
 
 	return responsive_axons
 
-cutoff_freq = 1.8
-if 'responsive_axons_cutoff_{}.p'.format(cutoff_freq) in os.listdir('thalamocortical_Oren/thalamic_data'):
-	responsive_axons_dict = cPickle.load(open('thalamocortical_Oren/thalamic_data/responsive_axons_cutoff_{}.p'.format(cutoff_freq), 'rb'))
-else:
-	responsive_axons_dict = getResponsiveAxons([6666, 9600], filenames['thalamic_activations'], filenames['stim_times'])
-	cPickle.dump(responsive_axons, open('thalamocortical_Oren/thalamic_data/responsive_axons_cutoff_{}.p'.format(cutoff_freq), 'wb'))
-responsive_axons = responsive_axons_dict[activated_standard_freq]
+# cutoff_freq = 1.8
+# if 'responsive_axons_cutoff_{}.p'.format(cutoff_freq) in os.listdir('thalamocortical_Oren/thalamic_data'):
+# 	responsive_axons_dict = cPickle.load(open('thalamocortical_Oren/thalamic_data/responsive_axons_cutoff_{}.p'.format(cutoff_freq), 'rb'))
+# else:
+# 	responsive_axons_dict = getResponsiveAxons([6666, 9600], filenames['thalamic_activations'], filenames['stim_times'])
+# 	cPickle.dump(responsive_axons, open('thalamocortical_Oren/thalamic_data/responsive_axons_cutoff_{}.p'.format(cutoff_freq), 'wb'))
+# responsive_axons = responsive_axons_dict[activated_standard_freq]
 
 # ===============================================  Choose GIDs  ===============================================
 print('\n========== Choosing GIDs from BlueBrain Database (pyramidal between {}Hz and {}Hz) =========='.format(freq1, freq2))
 
-pyr_GIDs = cell_type_gids[pyr_type]
-PV_types = []
-for t in cell_type_gids.keys():
-	if all([i not in t for i in not_PVs]):
-		PV_types.append(t)
-PV_GIDs = [j for i in [cell_type_gids[t] for t in PV_types] for j in i]
+# pyr_GIDs = cell_type_gids[pyr_type]
+# PV_types = []
+# for t in cell_type_gids.keys():
+# 	if all([i not in t for i in not_PVs]):
+# 		PV_types.append(t)
+# PV_GIDs = [j for i in [cell_type_gids[t] for t in PV_types] for j in i]
 
-chosen_pyr, chosen_PV, chosen_PV_n_contacts = getChosenGIDs(pyr_GIDs, PV_GIDs, freq1, freq2) # chosen_pyr==gid, chosen_V==[[gid, no_contancts],...]
+# chosen_pyr, chosen_PV, chosen_PV_n_contacts = getChosenGIDs(pyr_GIDs, PV_GIDs, freq1, freq2) # chosen_pyr==gid, chosen_V==[[gid, no_contancts],...]
+
+connectivity = Connectivity(pyr_type, [not_PVs, 'exclude'], [SOM_types, 'include'], 
+							cell_type_to_gids=filenames['cell_type_gids'],
+							thalamic_locs=filenames['thalamic_locs'], 
+							cell_details=filenames['cell_details'],
+							cortex_connectivity=filenames['cortex_connectivity'])
+
+chosen_pyr = connectivity.choose_GID_between_freqs(connectivity.pyr_GIDs)
+chosen_PV, chosen_PV_gids = connectivity.choose_GID_by_post(connectivity.PV_GIDs, connectivity.pyr_GIDs)
+
+# No need to chooes SOM GIDs because they don't get thalamic input?
+
 
 # ===============================================  Create Cell Populations  ===============================================
 
 print('\n========== Creating pyramidal cell ==========')
-Pyr_pop = Population('Pyr', pyr_morph_path, pyr_template_path, pyr_template_name)
+Pyr_pop = Population('Pyr', pyr_morph_path, pyr_template_path, pyr_template_name, verbose=False)
 Pyr_pop.addCell()
 Pyr_pop.name_to_gid['Pyr0'] = chosen_pyr
 
 print('\n========== Creating PV population ==========')
-n_PV  		  = len(chosen_PV)
-PV_pop = Population('PV', PV_morph_path, PV_template_path, PV_template_name)
+n_PV   = len(chosen_PV)
+PV_pop = Population('PV', PV_morph_path, PV_template_path, PV_template_name, verbose=False)
 for i in tqdm(range(n_PV)):
 	PV_pop.addCell()
 	PV_pop.name_to_gid['PV%i'%i] = chosen_PV[i]
+
+print('\n========== Creating SOM population ==========')
+n_SOM  = 9
+SOM_pop = Population('SOM', SOM_morph_path, SOM_template_path, SOM_template_name, verbose=False)
+for i in tqdm(range(SOM_pop)):
+	SOM_pop.addCell()
 
 # ==============================================  Morphology Visualization  ==============================================
 
@@ -258,6 +290,7 @@ for i, PV_cell_name in enumerate(tqdm(PV_pop.cells)):
 
 print('\n========== Connecting thalamic inputs to Pyramidal cell (standard: {}Hz, input weight: {}uS) =========='.format(activated_standard_freq, Pyr_input_weight))
 Pyr_pop.addInput(list(Pyr_pop.cells.keys())[0], chosen_pyr, weight=Pyr_input_weight, thalamic_activations_filename=activated_filename, thalamic_connections_filename=filenames['thalamic_connections'])
+
 # IMPORTANT NOTIC: MUST be defined outside of functino or else hoc doesn't recognize netcon name!
 pyr_events = []
 for axon in Pyr_pop.inputs['Pyr0']:
@@ -267,17 +300,24 @@ for axon in Pyr_pop.inputs['Pyr0']:
 			pyr_events.append(h.FInitializeHandler('nrnpython("Pyr_pop.inputs[\'Pyr0\'][\'{}\'][\'netcons\'][{}].event({})")'.format(axon, i, time+Pyr_input_delay)))
 # del i, time, axon
 
+connect_interneurons = False
+if connect_interneurons:
+	print('Connecting PV population to Pyramidal cell (connection weight: {}uS)'.format(PV_to_Pyr_weight))
+	Pyr_soma = Pyr_pop.cells['Pyr0']['cell'].soma[0]
+	for PV_cell_name in (tqdm):
+		temp_PV_gid = PV_pop.name_to_gid[PV_cell_name]
+		PV_pop.connectCells(PV_cell_name, [Pyr_soma], chosen_PV_n_contacts[temp_PV_gid], 'random', weight=PV_to_Pyr_weight, delay=PV_output_delay, threshold=spike_threshold) # Adds self.connections to Population
+	print('\n***WARNING: Assuming isopotential soma and perisomatic PV connections: all PV synapses are placed on soma(0.5)')
+	
+	SOM_to_PV_weight = PV_to_Pyr_weight * n_SOM
+	for PV_cell in PV_pop.cells:
+		temp_PV_soma = PV_pop.cells[PV_cell]['cell'].soma[0]
+		SOM_pop.connectCells(...)
 
-# print('Connecting PV population to Pyramidal cell (connection weight: {}uS)'.format(PV_to_Pyr_weight))
-# Pyr_soma = Pyr_pop.cells['Pyr0']['cell'].soma[0]
-# for PV_cell_name in PV_pop.cells:
-# 	temp_PV_gid = PV_pop.name_to_gid[PV_cell_name]
-# 	PV_pop.connectCells(PV_cell_name, [Pyr_soma], chosen_PV_n_contacts[temp_PV_gid], 'random', weight=PV_to_Pyr_weight, delay=PV_output_delay, threshold=spike_threshold) # Adds self.connections to Population
-# print('\n***WARNING: Assuming isopotential soma and perisomatic PV connections: all PV synapses are placed on soma(0.5)')
-
+	print('Connecting SOM population to PV Population (connection weight: {}uS)'.format(SOM_to_PV_weight))
 # ============================================== Plot example responses ==============================================
 
-record_PV_dendrite = True
+record_PV_dendrite = False
 recorded_segment = []
 if record_PV_dendrite:
 	dend = [i for i in PV_pop.cells['PV3']['basal_dendrites'] if 'dend[42]' in i.name()][0]
@@ -294,7 +334,8 @@ def Wehr_Zador(population, cell_name, title_, exc_weight=0, inh_weight=0, standa
 	# times = stimuli[activated_standard_freq].stim_times_all
 	# times  = [i[0] for i in times if i[1]==standard_freq and i[0]<h.tstop] # Take only times of standard frequency stimulus
 	
-	times = stimuli[standard_freq].stim_times_standard
+	# times = stimuli[standard_freq].stim_times_standard
+	times = [i[0] for i in stimuli[standard_freq].stim_times_all]
 	times = [i for i in times if i<h.tstop]
 
 	cut_vec = lambda vec, start_idx, end_idx: [vec[i] for i in range(start_idx, end_idx)]
@@ -443,265 +484,119 @@ if record_PV_dendrite:
 	plt.title('Voltage in {}({})'.format(dend, seg))
 	plt.xlabel('T (ms)')
 	plt.ylabel('V (mV)')
-# ============================================== Analyze Connectivity ==============================================
 
-analyze_connectivity = False
-if analyze_connectivity:
-	_, bar_ax = plt.subplots()
-	pyr_connectivity = pd.read_pickle(filenames['pyr_connectivity'])
-	PV_contacts = {pyr: [] for pyr in pyr_connectivity}
-	for pyr in pyr_connectivity:
-		for contact in pyr_connectivity[pyr]:
-			if contact in PV_GIDs:
-				PV_contacts[pyr].append(pyr_connectivity[pyr][contact])
-	mean_pre_PV = np.mean([len(PV_contacts[i]) for i in PV_contacts])                                                                                                                 
-	mean_PV_contacts = np.mean([sum(PV_contacts[i]) for i in PV_contacts]) 
-	bar_ax.bar(['Presynaptic PV', 'No. PV contacts'], [mean_pre_PV, mean_PV_contacts], color='g')
-	bar_ax.set_title('Presynaptic PV connections to Pyramidal cells (PV defined as: {})'.format(PV_type))
+# ============================================== Analyze Input vs. Response ==============================================
 
+print('Analyzing input vs. Pyramidal somatic responses')
+def InputvsResponse(Pyr_pop, input_pop, standard_freq, stimuli, axon_gids, take_before=0, take_after=100, activated_filename=activated_filename):
 
-	all_pyr_connectivity = pd.read_pickle(filenames['pyr_connectivity'])
-	pyr_connectivity = all_pyr_connectivity[chosen_pyr]
-	all_cons = {i: {'count':0,'contacts':0} for i in mtypes} 
-	for con in pyr_connectivity: 
-		if con in GIDS: 
-			M = cell_details.loc[con].mtype 
-			all_cons[M]['count']+=1 
-			all_cons[M]['contacts']+=pyr_connectivity[con] 
-
-	for i in list(all_cons.keys()): 
-		if all_cons[i]['count']==0: 
-			del all_cons[i] 
-	for i in list(all_cons.keys()):
-		if 'BTC' in i or 'L1' in i or 'MC' in i or 'PC' in i or 'SP' in i or 'SS' in i:
-			del all_cons[i]
-
-	sum=0;types=[] 
-	for i in all_cons: 
-		if 'L4' in i: 
-			sum+=all_cons[i] 
-			types.append(i)
-
-'''
-from neuron import h,gui
-import matplotlib.pyplot as plt
-dend=h.Section('dend')
-dend.insert('pas')
-h.v_init = dend.e_pas
-syn1 = h.ProbAMPANMDA2_RATIO(dend(0.5))
-NET1 = h.NetCon(None, syn1)
-NET1.weight[0]=0.4
-time1 = 50
-syn2 = h.ProbAMPANMDA2_RATIO(dend(0.2))
-NET2 = h.NetCon(None, syn2)
-NET2.weight[0]=0.4
-time2 = 100
-times = [time1, time2]
-NETS = [NET1, NET2]
-events = []
-for i in range(len(NETS)):
-	T = times[i]
-	print('time: {}, con: {}'.format(T, NETS[i]))
-	events.append(h.FInitializeHandler('nrnpython("NETS[{}].event({})")'.format(i, T)))
-h.tstop=500;t=h.Vector();t.record(h._ref_t)
-v=h.Vector();v.record(dend(0.5)._ref_v) 
-h.run();plt.plot(t,v)  
-
-
-events2 = []
-syn3 = h.ProbAMPANMDA2_RATIO(dend(0.5))
-NET3 = h.NetCon(None, syn3)
-NET3.weight[0]=0.4
-time3 = 300
-syn4 = h.ProbAMPANMDA2_RATIO(dend(0.2))
-NET4 = h.NetCon(None, syn4)
-NET4.weight[0]=0.4
-time4 = 400
-times2 = [time3, time4]
-NETS2 = [NET3, NET4]
-for con in NETS2:
-	T = times2[NETS2.index(con)]
-	print('time: {}, con: {}'.format(T, con))
-	events2.append(h.FInitializeHandler('nrnpython("con.event({})")'.format(T)))
-h.tstop=500;t=h.Vector();t.record(h._ref_t)
-v=h.Vector();v.record(dend(0.5)._ref_v) 
-h.run();plt.plot(t,v)  
-
-
-
-
-
-
-
-
-
-for axon in ['thalamic_gid_221076', 'thalamic_gid_221082']:
-	stim_times = Pyr_pop.inputs['Pyr0'][axon]['stim_times']
-	for i in range(2):
-		for time in stim_times:
-			pyr_events.append(h.FInitializeHandler('nrnpython("Pyr_pop.inputs[\'Pyr0\'][\'{}\'][\'netcons\'][{}].event({})")'.format(axon, i, time+delay)))
-
-
-
-pyr_events = []
-for axon in ['thalamic_gid_221076', 'thalamic_gid_221082']:
-	stim_times = Pyr_pop.inputs['Pyr0'][axon]['stim_times']
-	for con in Pyr_pop.inputs['Pyr0'][axon]['netcons'][:2]:
-		for time in stim_times:
-			pyr_events.append(h.FInitializeHandler('nrnpython("con.event({})")'.format(time+delay)))
-'''
-'''
-def event_python_function(): #for this to work you must name every variable differently (i.e. time1, time2, etc..  or stim_times[i] inside function)
-	global current_netcon, current_time, delay
-	current_netcon.event(current_time+delay) 
-
-'''
-'''
-cvode = h.CVode()
-temp_vec = h.Vector()
-cvode.spike_stat(temp_vec)
-n_NetCons = int(temp_vec.x[1])
-events = []
-for i in range(n_NetCons):
-	events.append(h.FInitializeHandler('nrnpython("NetCon[{}].event({})")'.format(i, time+delay)))
-'''
-
-# ==============================================  Run Simulation & Plot Results  ==============================================
-# PYR_cell, PV_pop = RunSim(PYR_cell, PV_pop)
-
-# ==============================================  Connectivity Analysis  ==============================================
-def analyzeConnectivityFromThalamus(which_layer, which_mtype, filenames=filenames):
-
-	cell_details = pd.read_pickle(filenames['cell_details'])
-	thal_connections = pd.read_pickle(filenames['thalamic_connections'])
-
-	if which_layer=='all':
-		which_layer = ''
-	else:
-		if which_layer.isdigit():
-			which_layer = 'L' + which_layer
-
-	cell_type = which_layer + '_' + which_mtype
-	GIDs = [cell_details.index[i] for i in range(len(cell_details)) if cell_details.iloc[i].mtype==cell_type]
-
-	# How many contacts each thalamic axon *makes* on each of the specified cell
-	contacts_per_axon = [thal_connections.iloc[i].contacts for i in range(len(thal_connections)) if thal_connections.iloc[i].post_gid in GIDs]
-
-	# pyramidal and all thalamic axons connected to it
-	per_gid = {gid: [] for gid in GIDs}
-	for i in range(len(thal_connections)):
-		POST = thal_connections.iloc[i].post_gid
-		if POST in GIDs:
-			per_gid[POST].append(thal_connections.iloc[i].contacts)
-
-	axons_per_gid = {gid: len(per_gid[gid]) for gid in GIDs}
-	contacts_per_incoming_axon = {gid: np.mean(per_gid[gid]) for gid in GIDs if axons_per_gid[gid]!=0}
-
-	stats = {'contacts_per_axon': {'mean_out_contacts': np.mean(contacts_per_axon), # How many contacts a thalamic axon makes on the specified cell on average
-						  'std': np.std(contacts_per_axon)},
-			 'per_cell': {'mean_incoming_contacts': np.mean(list(contacts_per_incoming_axon.values())), # How many contacts *on* cell from each axon (on average)
-			 			  'std': np.std(list(contacts_per_incoming_axon.values())),
-			 			  'mean_incoming_axons': np.mean(list(axons_per_gid.values()))}
-			}
-
-	return stats
-
-# thalamo_to_pyr_stats = analyzeConnectivityFromThalamus('L23', 'PC')
-# thalamo_to_PV_stats  = analyzeConnectivityFromThalamus('L23', 'LBC')
-
-# # Number of thalamic axons contacting each cell
-# n_axons_to_pyr = thalamo_to_pyr_stats['per_cell']['mean_incoming_axons']
-# n_axons_to_PV  = thalamo_to_PV_stats['per_cell']['mean_incoming_axons']
-
-# # Number of contacts a thalamic axon makes on each cell
-# n_contacts_to_pyr = thalamo_to_pyr_stats['per_cell']['mean_incoming_contacts']
-# n_contacts_to_PV  = thalamo_to_PV_stats['per_cell']['mean_incoming_contacts']
-
-'''
-GENERAL- EPFL cell models:
-	- Template: under the name template.py. In the template the morphology is loaded, biophys() is called and 
-				synapses are added (if input to template is 1). <morphology.hoc, biophysics.hoc, synapses/synapses.hoc>
+	Pyr_response = Pyr_pop.cells['Pyr0']['soma_v']
+	# thalamic_activations = cPickle.load(open('thalamocortical_Oren/SSA_spike_times/input%s_by_gid.p'%standard_freq, 'rb'))
+	thalamic_activations = cPickle.load(open('{}'.format(activated_filename), 'rb'))
 	
-	- Adding synapses: synaptic inputs to loaded cell can be enabled (if input to template is 1). "..all the synapses 
-					   that cells from the specified m-type (?) make on the simulated cell will  become active". Each
-					   presynaptic cell is represented by a Poisson spike train. Default firing rate is set to 10Hz,
-					   but can be changed (I need to figure out how, outside of the GUI).
+	# times = stimuli[standard_freq].stim_times_standard
+	times = [i[0] for i in stimuli[standard_freq].stim_times_all]
+	times = [i for i in times if i<h.tstop]
+
+	cut_vec = lambda vec, start_idx, end_idx: [vec[i] for i in range(start_idx, end_idx)]
 	
-	- ?? Deleteing axons ??: In template (for now I know about LBC-cNAC), all axons (many) are deleted and replaced
-							 by 1 short axon ("stub axon" in documentation). WHY?
+	input_groups = {'spike_success': [], 'spike_fail': []}
+	spike_count = 0
 
-	- ?? How to model thalamic input ??: Eli said to look at Oren's input.
+	for T in tqdm(times):
+		temp_timings = {axon: {'times': [], 'stim_FR_sec': None} for axon in axon_gids}
+		for axon in axon_gids:
+			temp_axon_timings = [i for i in thalamic_activations[axon] if (i >= T-take_before) and (i <= T+take_after)]
+			temp_timings[axon]['times'] = temp_axon_timings
+			temp_timings[axon]['stim_FR_sec'] = 1000*len(temp_axon_timings) / (take_after - take_before)
+		idx1 = (np.abs([i-(T-take_before) for i in t])).argmin()
+		idx2 = (np.abs([i-(T+take_after) for i in t])).argmin()
+		
+		v_vec = cut_vec(Pyr_pop.cells['Pyr0']['soma_v'], idx1, idx2)
+		if any([i>=spike_threshold for i in v_vec]):
+			spike_count += 1
+			input_groups['spike_success'].append(temp_timings)
+		else:
+			input_groups['spike_fail'].append(temp_timings)
 
-PV Population:
-	I will start with the following model from nmc-portal (EPFL), based on Markram et al., 2004 (interneuron review): 
-	- L23 
-	- LBC (large basket cell) 
-	- cNAC (classic non-accommodating)
+	fig, axes = plt.subplots(2, 2)
+	axes = [j for i in axes for j in i]
+	fig.subplots_adjust(hspace=0.34, bottom=0.08, top=0.9) 
+	fig.suptitle('Comparison Between Inputs Succeeding & Failing to Elicit Spike in Pyramidal Cell', size=15)
 
-	* Basket cells typically express PV 
-	* cNAC look the most simple firing pattern. 
-	* There are 5 different models for this in  nmc portal. For simplicity I downloaded number1  for now.
-	* "Most PV+ neurons are chandelier and basket cells, which make powerful inhibitory synapses onto the 
-		somatic and perisomatic regions of pyramidal cells" (Moore and Wehr, 2013)
-	* "... PV cells, the delay is very short (1–2 ms), creating a limited temporal 'window of opportunity'
-		(Alonso and Swadlow, 2005; Pinto et al., 2000) for PCs to summate afferent inputs" (Tremblay, Lee, and Rudy, 2016)
+	success_all_FRs = [m for n in [[i[a]['stim_FR_sec'] for a in i] for i in input_groups['spike_success']] for m in n]
+	fail_all_FRs = [m for n in [[i[a]['stim_FR_sec'] for a in i] for i in input_groups['spike_fail']] for m in n]
+	
+	success_FR_mean = np.mean(success_all_FRs)
+	fail_FR_mean = np.mean(fail_all_FRs)
+	
+	success_FR_std = np.std(success_all_FRs)
+	fail_FR_std = np.std(fail_all_FRs)
+	success_FR_se = success_FR_std / np.sqrt(len(success_all_FRs))
+	fail_FR_se = fail_FR_std / np.sqrt(len(fail_all_FRs))
 
-Pyramidal cell:
-	Currently I am using Itay Hay's L5PC model. Possibly use EPFL model also here- check which layer.
+	_, pval0 = ttest_ind(success_all_FRs, fail_all_FRs)
+	axes[0].set_title('Mean Firing Rates (p = %.3f)'%pval0)
+	axes[0].bar(['Success', 'Fail'], [success_FR_mean, fail_FR_mean], yerr=[success_FR_se, fail_FR_se], alpha=0.5)
+	axes[0].set_ylabel(r'FR ($\frac{spikes}{sec}$)')
+	axes[0].set_xlim([-1, 2])
 
-	! Make sure my biophys is like Itay Hay's !
-'''
+	success_all_high_FRs = [m for m in success_all_FRs if m>cutoff_freq]
+	fail_all_high_FRs = [m for m in fail_all_FRs if m>cutoff_freq]
+	success_high_FR_mean = np.mean(success_all_high_FRs)
+	fail_high_FR_mean = np.mean(fail_all_high_FRs)
 
+	success_high_FR_std = np.std(success_all_high_FRs)
+	success_high_FR_se = success_high_FR_std / np.sqrt(len(success_all_high_FRs))
+	fail_high_FR_std = np.std(fail_all_high_FRs)
+	fail_high_FR_se = fail_high_FR_std / np.sqrt(len(fail_all_high_FRs))
 
+	_, pval1 = ttest_ind(success_all_high_FRs, fail_all_high_FRs)
+	axes[1].set_title('Mean High Firing Rates - above %.1f (p = %.3f)'%(cutoff_freq, pval1))
+	axes[1].bar(['Success', 'Fail'], [success_high_FR_mean, fail_high_FR_mean], yerr=[success_high_FR_se, fail_high_FR_se], alpha=0.5, label='Mean')
+	axes[1].bar(['Success', 'Fail'], [np.median(success_all_high_FRs), np.median(fail_all_high_FRs)], yerr=[success_high_FR_se, fail_high_FR_se], alpha=0.5, label='median')
+	axes[1].set_ylabel(r'FR ($\frac{spikes}{sec}$)')
+	axes[1].set_xlim([-1, 2])
+	axes[1].legend()
+	
+	success_ISI = [[list(np.diff(i[axon]['times'])) for axon in i if len(i[axon]['times'])>1] for i in input_groups['spike_success']]
+	fail_ISI = [[list(np.diff(i[axon]['times'])) for axon in i if len(i[axon]['times'])>1] for i in input_groups['spike_fail']]
 
+	success_all_ISI = [m for k in [ j for i in success_ISI for j in i] for m in k]
+	fail_all_ISI = [m for k in [ j for i in fail_ISI for j in i] for m in k]
 
+	success_ISI_mean = np.mean(success_all_ISI)  
+	fail_ISI_mean = np.mean(fail_all_ISI) 
 
+	success_ISI_std = np.std(success_all_ISI)  
+	fail_ISI_std = np.std(fail_all_ISI)  
 
-'''
-import matplotlib.pyplot as plt
-from neuron import gui,h
-h('create dend1')
-dend1 = h.dend1
-dend1.insert('pas')
-h('create dend2')
-dend2 = h.dend2
-dend2.insert('pas')
+	success_ISI_se = success_ISI_std / np.sqrt(len(success_all_ISI))
+	fail_ISI_se = fail_ISI_std / np.sqrt(len(fail_all_ISI))
 
+	_, pval2 = ttest_ind(success_all_ISI, fail_all_ISI)
+	axes[2].set_title('Mean Inter-Spike-Interval (p = %.3f)'%pval2)
+	axes[2].bar(['Success', 'Fail'], [success_ISI_mean, fail_ISI_mean], yerr=[success_ISI_se, fail_ISI_se], alpha=0.5)
+	axes[2].set_ylabel('Mean ISI (ms)')
+	axes[2].set_xlim([-1, 2])
 
-syn1 = h.ProbAMPANMDA2_RATIO(0.5, sec=dend1)
-netstim1 = h.NetStim(0.5, sec=dend1)
-netstim1.start = 100
-netcon1 = h.NetCon(netstim1, syn1)
-netcon1.weight[0] = 0.5
+	success_non_responsive = [len([i for i in t.values() if i['stim_FR_sec']<=cutoff_freq]) for t in input_groups['spike_success']]
+	fail_non_responsive = [len([i for i in t.values() if i['stim_FR_sec']<=cutoff_freq]) for t in input_groups['spike_fail']]
+	success_se = np.std(success_non_responsive) / np.sqrt(len(success_non_responsive))
+	fail_se = np.std(fail_non_responsive) / np.sqrt(len(fail_non_responsive))
+	_, pval3 = ttest_ind(success_non_responsive, fail_non_responsive)
+	axes[3].set_title('Number of Non-Responsive (p = %.3f)'%pval3)
+	axes[3].bar(['Success', 'Fail'], [np.mean(success_non_responsive), np.mean(fail_non_responsive)], yerr=[success_se, fail_se], alpha=0.5)
+	axes[3].set_ylabel('Number of Non-Responsive')
+	axes[3].set_xlim([-1, 2])
+	return input_groups
 
-syn2 = h.ProbAMPANMDA2_RATIO(0.5, sec=dend2)
-netcon2 = h.NetCon(dend1(0.5)._ref_v, syn2, sec=dend1)
-netcon2.weight[0] = 0.5
-netcon2.delay = 1
-netcon2.threshold = -69.995
-
-v1 = h.Vector(); v1.record(dend1(0.5)._ref_v)
-v2 = h.Vector(); v2.record(dend2(0.5)._ref_v)
-g_AMPA = h.Vector(); g_AMPA.record(syn2._ref_g_AMPA)
-g_NMDA = h.Vector(); g_NMDA.record(syn2._ref_g_NMDA)
-
-t = h.Vector(); t.record(h._ref_t)
-h.tstop = 250
-h.v_init = -70
-h.finitialize()
-h.run()
-
-plt.plot(t, v1)
-plt.plot(t, v2)
-plt.figure()
-plt.plot(t,g_AMPA)
-plt.plot(t, g_NMDA)
-'''
-
-
-
-
-
+try:
+	cutoff_freq = cutoff_freq
+except:
+	cutoff_freq = 1.8
+pyr_input_gids = [int(i.split('gid_')[1]) for i in Pyr_pop.inputs['Pyr0'].keys()]  
+input_groups = InputvsResponse(Pyr_pop, PV_pop, 6666, stimuli, pyr_input_gids, take_before=0, take_after=100)
 
 
 
