@@ -230,18 +230,6 @@ class Population():
 			os.chdir(original_path)
 			return filename
 		
-		def get_activations(filename, axon_gids):
-			temp_data = [i.strip().split() for i in open(filename).readlines()]
-			activations = [] 
-			for i in range(len(temp_data)): 
-				if temp_data[i][0].replace('.', '').isdigit():
-					if not axon_gids: # If specific GIDs not given by user
-						activations.append([float(temp_data[i][0]), int(float(temp_data[i][1]))]) 
-					else: 			  # Take only activations for user given GIDs
-						if int(float(temp_data[i][1])) in axon_gids:
-							activations.append([float(temp_data[i][0]), int(float(temp_data[i][1]))]) 
-			return activations
-
 		def getInputs(cell_gid, thalamic_activations, thalamic_connections_filename):
 			thal_connections = pd.read_pickle(thalamic_connections_filename)
 			connecting_gids = []
@@ -253,9 +241,11 @@ class Population():
 
 			# Get tha thalamic activation timings and no. of contacts on the pyramidal cell
 			cell_inputs = {i[0]: {'contacts': i[1], 'times': []} for i in connecting_gids}
-			for i in thalamic_activations:
-				if i[1] in cell_inputs.keys():
-					cell_inputs[i[1]]['times'].append(i[0])
+
+			# After saving all activations to .p dict
+			for a in thalamic_activations:
+				if a in cell_inputs.keys():
+					cell_inputs[a]['times'] = thalamic_activations[a]
 
 			return cell_inputs
 
@@ -312,8 +302,7 @@ class Population():
 		thalamic_activations_filename = checkValidFilename(thalamic_activations_filename, cond='exist')
 		thalamic_activations_filename = checkValidFilename(thalamic_activations_filename, cond='in_dir')
 
-		# Open thalamic activations file and process data
-		thalamic_activations = get_activations(thalamic_activations_filename, axon_gids)
+		thalamic_activations = cPickle.load(open(thalamic_activations_filename, 'rb'))
 
 		# For the given cell, find: presynaptic thalamic GIDs, no. of contacts each one makes and their activation timings
 		print('\n- Finding presynaptic contacts for cell {}'.format(cell_name))

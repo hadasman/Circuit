@@ -58,8 +58,6 @@ def initializeParameters():
 			 'thalamic_locs': 'thalamocortical_Oren/thalamic_data/thalamic_axons_location_by_gid.pkl',
 			 'thalamic_connections': 'thalamocortical_Oren/thalamic_data/thalamo_cortical_connectivity.pkl',
 			 'thalamic_activations_6666': 'thalamocortical_Oren/SSA_spike_times/input6666_artificial.p',
-			 # 'thalamic_activations_6666': 'thalamocortical_Oren/SSA_spike_times/input6666_successes_by_gid.p',
-			 # 'thalamic_activations_9600': 'thalamocortical_Oren/SSA_spike_times/input9600_109680.p',
 			 'thalamic_activations_9600': 'thalamocortical_Oren/SSA_spike_times/input9600_by_gid.p',
 			 'pyr_connectivity': 'thalamocortical_Oren/pyramidal_connectivity_num_connections.p',
 			 'cortex_connectivity': 'thalamocortical_Oren/cortex_connectivity_num_connections.p',       
@@ -67,8 +65,7 @@ def initializeParameters():
 			 'stim_times': 'thalamocortical_Oren/SSA_spike_times/stim_times.p',
 			 'thalamic_activations': {6666: 'thalamocortical_Oren/SSA_spike_times/input6666_106746.dat', 9600: 'thalamocortical_Oren/SSA_spike_times/input9600_109680.dat'}}
 
-	# cell_type_gids 	= cPickle.load(open(filenames['cell_type_gids'],'rb'))     
-	thal_connections = pd.read_pickle(filenames['thalamic_connections'])
+	thal_connections   = pd.read_pickle(filenames['thalamic_connections'])
 	thalamic_locations = pd.read_pickle(filenames['thalamic_locs'])
 initializeParameters() # Keep here
 
@@ -213,15 +210,6 @@ def getResponsiveAxons(standard_freqs, activations_filename, stim_times_filename
 # ===============================================  Choose GIDs  ===============================================
 print('\n========== Choosing GIDs from BlueBrain Database (pyramidal between {}Hz and {}Hz) =========='.format(freq1, freq2))
 
-# pyr_GIDs = cell_type_gids[pyr_type]
-# PV_types = []
-# for t in cell_type_gids.keys():
-# 	if all([i not in t for i in not_PVs]):
-# 		PV_types.append(t)
-# PV_GIDs = [j for i in [cell_type_gids[t] for t in PV_types] for j in i]
-
-# chosen_pyr, chosen_PV, chosen_PV_n_contacts = getChosenGIDs(pyr_GIDs, PV_GIDs, freq1, freq2) # chosen_pyr==gid, chosen_V==[[gid, no_contancts],...]
-
 connectivity = Connectivity(pyr_type, [not_PVs, 'exclude'], [SOM_types, 'include'], 
 							cell_type_to_gids=filenames['cell_type_gids'],
 							thalamic_locs=filenames['thalamic_locs'], 
@@ -230,9 +218,7 @@ connectivity = Connectivity(pyr_type, [not_PVs, 'exclude'], [SOM_types, 'include
 
 chosen_pyr = connectivity.choose_GID_between_freqs(connectivity.pyr_GIDs)
 chosen_PV, chosen_PV_gids = connectivity.choose_GID_by_post(connectivity.PV_GIDs, connectivity.pyr_GIDs)
-
-# No need to chooes SOM GIDs because they don't get thalamic input?
-
+# chosen_SOM => No need to chooes SOM GIDs because they don't get thalamic input?
 
 # ===============================================  Create Cell Populations  ===============================================
 
