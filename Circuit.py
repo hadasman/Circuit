@@ -22,6 +22,8 @@ from plotting_functions import plotThalamicResponses, Wehr_Zador, PlotSomas, plo
 
 assert os.getcwd().split('/')[-1] == 'Circuit', 'Wrong directory'
 
+if len(sys.argv)>1:
+	tstop = sys.argv[1]
 # ============================================  Define Functions & Constants  ============================================
 '''
 Plan:
@@ -250,7 +252,7 @@ if record_PV_dendrite:
 
 print('\n========== Running Simulation (time: {}:{:02d}) =========='.format(time_module.localtime().tm_hour, time_module.localtime().tm_min))
 start_time = time_module.time()
-t, dend_v = RunSim(tstop = 20000, record_specific=recorded_segment)
+t, dend_v = RunSim(tstop = tstop, record_specific=recorded_segment)
 end_time = time_module.time()
 # os.system("say simulation took %i seconds"%(end_time-start_time))
 print("Simulation took %i seconds"%(end_time-start_time))
