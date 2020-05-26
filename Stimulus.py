@@ -2,24 +2,24 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 from math import log
-from mpl_toolkits.axes_grid.inset_locator import (inset_axes, InsetPosition, mark_inset)
+from mpl_toolkits.axes_grid1.inset_locator import (inset_axes, InsetPosition, mark_inset)
 import pdb
-
+import _pickle as cPickle
 from tkinter import messagebox
 
 class Stimulus():
 	def __init__(self, standard_frequency, deviant_frequency, stim_times_filename, thalamic_activations_filename, axon_gids=None):
 
 		def get_activations(filename, axon_gids):
-			temp_data = [i.strip().split() for i in open(filename).readlines()]
-			activations = [] 
-			for i in range(len(temp_data)): 
-				if temp_data[i][0].replace('.', '').isdigit():
-					if not axon_gids: # If specific GIDs not given by user
-						activations.append([float(temp_data[i][0]), int(float(temp_data[i][1]))]) 
-					else: 			  # Take only activations for user given GIDs
-						if int(float(temp_data[i][1])) in axon_gids:
-							activations.append([float(temp_data[i][0]), int(float(temp_data[i][1]))]) 
+			temp_activations = cPickle.load(open(filename, 'rb'))			
+			
+			if axon_gids:
+				activations = {}
+				for a in axon_gids:
+					activations[a] = temp_activations[a]
+			else:
+				activations = temp_activations
+
 			return activations
 
 		self.standard_frequency = standard_frequency
@@ -31,7 +31,6 @@ class Stimulus():
 		
 		self.thalamic_activations = get_activations(thalamic_activations_filename, axon_gids=axon_gids)
 
-
 	def axonResponses(self, thalamic_locations, window=100, color='black', h_ax=None, plot_results=True):
 		if not h_ax:
 			_, h_ax = plt.subplots()
@@ -39,18 +38,22 @@ class Stimulus():
 		# Take only times that were at most <window>ms after stimulus
 		in_window = lambda time, inter: time > inter[0] and time <= inter[1] 
 		intervals = [[i, i+window] for i in self.stim_times_standard]
-		axons 	  = list(set([i[1] for i in self.thalamic_activations]))                                                                                  
+		# axons 	  = list(set([i[1] for i in self.thalamic_activations]))                                                                                  
+		axons = [i for i in self.thalamic_activations]
 
 		responses_dict 	= {gid: {'times':[], 'mean_FR': None, 'count': None} for gid in axons}   
 
 		# Take stimulus-responses from all spike times
 		for axon in self.thalamic_activations: 
-			time = axon[0]
-			gid  = axon[1] 
+			# time = axon[0]
+			# gid  = axon[1] 
+			gid = axon
+			times = self.thalamic_activations[gid]
 
-			time_in_window = any([in_window(time, inter) for inter in intervals])
-			if time_in_window:
-				responses_dict[gid]['times'].append(time)
+			for time in times:
+				time_in_window = any([in_window(time, inter) for inter in intervals])
+				if time_in_window:
+					responses_dict[gid]['times'].append(time)
 
 		# Count responses and mean firing rate
 		for axon in responses_dict: 

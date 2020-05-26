@@ -1,6 +1,8 @@
 import pandas as pd
 from math import log
-
+import _pickle as cPickle
+import pdb
+import numpy as np
 class Connectivity():
 
 	def __init__(self, pyr_type, PV_rule, SOM_rule, **kwargs):
@@ -12,7 +14,7 @@ class Connectivity():
 			- cortex_connectivity
 		'''
 
-		expected_kwargs = ['cell_type_to_gids', 'thalamic_locs', 'cell_details', 'cortex_connectivity']
+		expected_kwargs = ['cell_type_to_gids', 'thalamic_locs', 'cell_details', 'cortex_connectivity', 'thal_connections']
 		assert len(expected_kwargs)==len(kwargs), 'Expected {} kwargs but got {}'.format(len(expected_kwargs), len(kwargs))
 		assert all([i in kwargs for i in expected_kwargs]), 'At least 1 incorrect kwarg name!'
 
@@ -69,18 +71,17 @@ class Connectivity():
 
 		return GIDs
 
-	def choose_GID_between_freqs(self, potential_gids, min_freq=4000, df_dx=3.5):
+	def choose_GID_between_freqs(self, potential_gids, freq1, freq2, min_freq=4000, df_dx=3.5):
 		## (pyr_gids, PV_gids, freq1, freq2, min_freq=4000, df_dx=3.5, filenames=filenames)
 		# df/dx is n units [octave/mm]
 		
-		min_freq_loc = min(thalamic_locs.x)
+		min_freq_loc = min(self.thalamic_locs.x)
 
 		def get_AxonLoc(axon_freq, min_freq_loc, min_freq=min_freq, df_dx=df_dx):
-
-			dOctave 	= log(axon_freq / min_freq, 2) # In octaves
+			dOctave 	=  log(axon_freq / min_freq, 2)# In octaves
 			d_mm 		= dOctave / df_dx # In millimeters
 			d_microne 	= d_mm * 1000 # In micro-meter
-			freq_loc 	= min_freq + d_microne
+			freq_loc 	= min_freq_loc + d_microne
 
 			return freq_loc
 
@@ -91,13 +92,19 @@ class Connectivity():
 			dists = [abs(cell_details.loc[gid].x - mid_loc) for gid in potential_gids]
 			sorted_idx = [dists.index(i) for i in sorted(dists)]
 
-			chosen_gid = potential_gids[sorted_idx[0]]
+			OK, i = 0, 0
+			while not OK:
+				chosen_gid = potential_gids[sorted_idx[i]]
+				if chosen_gid in list(self.thal_connections.post_gid.values):
+					OK = 1
+				else:
+					i += 1
 
 			return chosen_gid
 
 		freq1_loc = get_AxonLoc(freq1, min_freq_loc)
 		freq2_loc = get_AxonLoc(freq2, min_freq_loc)
-
+		
 		chosen_gid = choose_GID(potential_gids, freq1_loc, freq2_loc, self.cell_details)
 
 		return chosen_gid
@@ -111,11 +118,24 @@ class Connectivity():
 
 		for gid in inputs_to_post:
 			if int(gid) in potential_gids:
-				chosen_gid.append(int(gid))
-				chosen_n_contacts[int(gid)] = inputs_to_post[gid]
+				chosen_gids.append(int(gid))
+				chosen_n_contacts[int(gid)] = self.cortex_connectivity[gid][post_gid]
 
-		return chosen_gid, chosen_n_contacts
+		return chosen_gids, chosen_n_contacts
+
+	def find_PresynGIDs(self, chosen_pyr):
+
+		connecting_gids = []
+		for con in self.thal_connections.iterrows():
+			if con[1].post_gid == chosen_pyr:
+				connecting_gids.append([con[1].pre_gid, con[1].contacts]) # [presynaptic gid, no. of contacts]
+
+		return connecting_gids
 
 
+			# Find thalamic GIDs connecting the the pyramidal cell
+			# for con in thal_connections.iterrows():
+			# 	if con[1].post_gid == cell_gid:
+			# 		connecting_gids.append([con[1].pre_gid, con[1].contacts]) # [presynaptic gid, no. of contacts]
 
-
+			# Get tha thalamic activation timings and no. of contacts on the pyramidal cell

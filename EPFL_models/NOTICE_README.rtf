@@ -1,0 +1,48 @@
+{\rtf1\ansi\ansicpg1252\cocoartf1671\cocoasubrtf600
+{\fonttbl\f0\fswiss\fcharset0 Helvetica-Bold;\f1\fswiss\fcharset0 Helvetica;\f2\fswiss\fcharset0 Helvetica-Oblique;
+\f3\fnil\fcharset0 LucidaGrande;}
+{\colortbl;\red255\green255\blue255;\red133\green0\blue175;\red102\green0\blue141;}
+{\*\expandedcolortbl;;\cssrgb\c59982\c16236\c74118;\cssrgb\c48169\c12809\c62212;}
+{\*\listtable{\list\listtemplateid1\listhybrid{\listlevel\levelnfc23\levelnfcn23\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{square\}}{\leveltext\leveltemplateid1\'01\uc0\u9642 ;}{\levelnumbers;}\fi-360\li720\lin720 }{\listname ;}\listid1}}
+{\*\listoverridetable{\listoverride\listid1\listoverridecount0\ls1}}
+\paperw11900\paperh16840\margl1440\margr1440\vieww10800\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\b\fs24 \cf0 IMPORTANT NOTICE!
+\f1\b0 \
+I change template.hoc to <template_name.hoc> for better generalisation in my .py script!\
+\
+
+\f0\b Fix for incompatibility of multiple models
+\f1\b0 : when loading templates of the same name (e.g. \'93biophysics.hoc\'94), only the first template is recognised, even when loading from different files. 
+\f0\b FIX
+\f1\b0 : change the \'93template.hoc\'94, \'93biophysics.hoc\'94 and \'93morphology.hoc\'94 to individual names, of the format \'93template_<template_name>.hoc\'94, \'93biophysics_<template_name>.hoc\'94 and so on. Template name can be found inside the template hoc file. \
+	* For example when loading cell template named \'93cADpyr229_L23_PC_5ecbf9b163\'94 (from 	  L23_PC_cADpyr229_1 file), the morphology file name would be 	  \'93
+\f2\i morphology_cADpyr229_L23_PC_5ecbf9b163.hoc
+\f1\i0 \'94\
+	\
+	* Also make sure to 
+\f0\b \cf2 delete (or comment out) the lines loading these files
+\f1\b0 \cf0  (and the 	  \'93synapses/synapse.hoc\'94 file) in the .hoc template , or this change will haunt you (unless you 	  want to go over each template and change the file names there as well)\
+	\
+	* And 
+\f0\b \cf3 delete (or comment out) the proc load_synapses()
+\f1\b0 \cf0 , if you don\'92t change its name as 	  well (no need, since I don\'92t load synapses from EPFL, but in case I want to- just do the same 	  for synapses.hoc as I did for the rest (bullet 1). 
+\f0\b \cf2 If commenting out
+\f1\b0 \cf0 , comment out only the proc 	  (not the above comment- doesn\'92t work)\
+\
+
+\f0\b What Population class expects
+\f1\b0 :\
+There should be certain .hoc files with constant names:\
+\pard\tx220\tx720\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\li720\fi-720\pardirnatural\partightenfactor0
+\ls1\ilvl0\cf0 {\listtext	
+\f3 \uc0\u9642 
+\f1 	}\ul constants.hoc\ulnone : all constants for simulation (h.dt, h.celsius, etc.)\
+{\listtext	
+\f3 \uc0\u9642 
+\f1 	}\ul morphology.hoc\ulnone : file that loads morphology (instantiates Neurolucida reader, loads .asc file etc.).\
+{\listtext	
+\f3 \uc0\u9642 
+\f1 	}\ul biophysics.hoc\ulnone : \
+}

@@ -1,0 +1,33 @@
+/********************************************************************
+Taken from Grunditz A, Holbro N, Tian L, Zuo Y and Oertner TG
+Spine neck plasticity controls postsynaptic calcium signals through
+electrical compartmentalization
+J Neuroscience (2008) 28: 13457-13466
+*************************************************/
+
+
+load_file("nrngui.hoc")
+
+/********************************************************************
+load cell morphology                           
+*************************************************/
+xopen("cellmorphology.hoc")
+
+
+/********************************************************************
+load spinehead, spineneck                      
+*************************************************/
+xopen("spine.hoc")
+
+
+/********************************************************************
+set up section lists and initialize parameters 
+*************************************************/
+xopen("iniparameter.hoc")
+
+
+/********************************************************************
+load figure                            
+*************************************************/
+load_file("fig4.hoc")
+

@@ -116,6 +116,42 @@ def CreateSpikeEvents(synapse_data, pop_name, cell_name, input_delay, given_stim
 	
 	return events 
 
+def set_ThalamicInputs(Pyr_pop, PV_pop, SOM_pop, thalamic_GIDs):
+	pyr_events, PV_events, SOM_events = [], [], []
+
+	if Pyr_pop:
+		print('\n==================== Connecting thalamic inputs to Pyramidal cell (standard: {}Hz, input weight: {}uS) ===================='.format(activated_standard_freq, Pyr_input_weight))
+		Pyr_pop.addInput(list(Pyr_pop.cells.keys())[0], weight=Pyr_input_weight, thalamic_activations_filename=activated_filename, connecting_gids=thalamic_GIDs['to_pyr'])
+		pyr_events = CreateSpikeEvents(Pyr_pop.inputs, 'Pyr_pop', 'Pyr0', Pyr_input_delay)
+
+	if PV_pop:
+		print('\n==================== Connecting thalamic inputs to PV cells (standard: {}Hz, input weight: {}uS) ===================='.format(activated_standard_freq, PV_input_weight))
+		if PV_to_Pyr_source == 'voltage':
+			PV_events = []
+			for i, PV_cell_name in enumerate(tqdm(PV_pop.cells)):
+				PV_pop.addInput(PV_cell_name, weight=PV_input_weight, thalamic_activations_filename=activated_filename, connecting_gids=thalamic_GIDs['to_PV'][PV_pop.name_to_gid[PV_cell_name]])	
+				PV_events.append(CreateSpikeEvents(PV_pop.inputs, 'PV_pop', PV_cell_name, PV_input_delay))
+			PV_events = [j for i in PV_events for j in i]
+
+		elif PV_to_Pyr_source == 'spike_times':
+			print('Loading PV spike times from file ({})'.format(filenames['PV_spike_times']))
+			PV_spike_times = cPickle.load(open(filenames['PV_spike_times'], 'rb'))
+
+			for PV_cell_name in PV_pop.cells:
+				PV_pop.cells[PV_cell_name]['soma_v'] = PV_spike_times['cells'][PV_cell_name]['soma_v']
+
+	if SOM_pop:
+		SOM_input_source = 'thalamic_input'
+		print('\n==================== Connecting {} inputs to SOM cell (standard: {}Hz, input weight: {}uS) ===================='.format(SOM_input_source, activated_standard_freq, SOM_input_weight))
+		if SOM_input_source == 'Pyr':
+			Pyr_pop.connectCells('Pyr0', 'voltage', [SOM_pop.cells['SOM0']['soma']], n_Pyr_to_SOM_syns, 'random', weight=SOM_input_weight, delay=SOM_input_delay)
+
+		elif SOM_input_source == 'thalamic_input':
+			SOM_pop.addInput('SOM0', weight=SOM_input_weight, thalamic_activations_filename=activated_filename, connecting_gids=thalamic_GIDs['to_SOM']) 
+			SOM_events = CreateSpikeEvents(SOM_pop.inputs, 'SOM_pop', 'SOM0', SOM_input_delay)
+
+	return pyr_events, PV_events, SOM_events
+
 def RunSim(v_init=-75, tstop=154*1000, verbose=True, record_specific=None):
 	# Oren's simulation length is 154 seconds, I leave some time for last inputs to decay
 	dend_v = []
@@ -156,76 +192,51 @@ if run_plot_function:
 Pyr_pop, PV_pop, SOM_pop = CreatePopulations(n_pyr=1, n_PV=1, n_SOM=1)
 
 # ==============================================  Connect Populations with Synapses and Inputs  ==============================================
+pyr_events, PV_events, SOM_events = set_ThalamicInputs(Pyr_pop, PV_pop, SOM_pop, thalamic_GIDs)
 
-def set_Inputs(Pyr_pop, PV_pop, SOM_pop, thalamic_GIDs):
-	pyr_events, PV_events, SOM_events = [], [], []
-
-	if Pyr_pop:
-		print('\n==================== Connecting thalamic inputs to Pyramidal cell (standard: {}Hz, input weight: {}uS) ===================='.format(activated_standard_freq, Pyr_input_weight))
-		Pyr_pop.addInput(list(Pyr_pop.cells.keys())[0], weight=Pyr_input_weight, thalamic_activations_filename=activated_filename, connecting_gids=thalamic_GIDs['to_pyr'])
-		pyr_events = CreateSpikeEvents(Pyr_pop.inputs, 'Pyr_pop', 'Pyr0', Pyr_input_delay)
-
-	if PV_pop:
-		print('\n==================== Connecting thalamic inputs to PV cells (standard: {}Hz, input weight: {}uS) ===================='.format(activated_standard_freq, PV_input_weight))
-		if PV_to_Pyr_source == 'voltage':
-			PV_events = []
-			for i, PV_cell_name in enumerate(tqdm(PV_pop.cells)):
-				PV_pop.addInput(PV_cell_name, weight=PV_input_weight, thalamic_activations_filename=activated_filename, connecting_gids=thalamic_GIDs['to_PV'][PV_pop.name_to_gid[PV_cell_name]])	
-				PV_events.append(CreateSpikeEvents(PV_pop.inputs, 'PV_pop', PV_cell_name, PV_input_delay))
-			PV_events = [j for i in PV_events for j in i]
-
-		elif PV_to_Pyr_source == 'spike_times':
-			print('Loading PV spike times from file ({})'.format(filenames['PV_spike_times']))
-			PV_spike_times = cPickle.load(open(filenames['PV_spike_times'], 'rb'))
-
-			for PV_cell_name in PV_pop.cells:
-				PV_pop.cells[PV_cell_name]['soma_v'] = PV_spike_times['cells'][PV_cell_name]['soma_v']
-
-	if SOM_pop:
-		SOM_input_source = 'thalamic_input'
-		print('\n==================== Connecting {} inputs to SOM cell (standard: {}Hz, input weight: {}uS) ===================='.format(SOM_input_source, activated_standard_freq, SOM_input_weight))
-		if SOM_input_source == 'Pyr':
-			Pyr_pop.connectCells('Pyr0', 'voltage', [SOM_pop.cells['SOM0']['cell'].soma[0]], n_Pyr_to_SOM_syns, 'random', weight=SOM_input_weight, delay=SOM_input_delay)
-
-		elif SOM_input_source == 'thalamic_input':
-			SOM_pop.addInput('SOM0', weight=SOM_input_weight, thalamic_activations_filename=activated_filename, connecting_gids=thalamic_GIDs['to_SOM']) 
-			SOM_events = CreateSpikeEvents(SOM_pop.inputs, 'SOM_pop', 'SOM0', SOM_input_delay)
-
-	return pyr_events, PV_events, SOM_events
-pyr_events, PV_events, SOM_events = set_Inputs(Pyr_pop, PV_pop, SOM_pop, thalamic_GIDs)
-connect_interneurons = False
+connect_interneurons = True
 if connect_interneurons:
 	
-	# PV ==> Pyr
-	print('Connecting PV population to Pyramidal cell (connection weight: {}uS)'.format(PV_to_Pyr_weight))	
-	PV_to_Pyr_events = []
-	Pyr_soma = Pyr_pop.cells['Pyr0']['cell'].soma[0]
-	for PV_cell_name in tqdm(PV_pop.cells):
-		temp_PV_gid = PV_pop.name_to_gid[PV_cell_name]
-		PV_pop.connectCells(PV_cell_name, PV_to_Pyr_source, [Pyr_soma], chosen_PV_n_contacts[temp_PV_gid], 'random', weight=PV_to_Pyr_weight, delay=PV_output_delay, threshold=spike_threshold) # Adds self.connections to Population
+	# PV ==> Pyr (either from PV spike times or PV soma voltage)
+	if PV_pop and Pyr_pop:
+		print('Connecting PV population to Pyramidal cell (connection weight: {}uS)'.format(PV_to_Pyr_weight))	
+		PV_to_Pyr_events = []
+		PV_to_Pyr_post_secs = [Pyr_pop.cells['Pyr0']['soma']]
 		
-		if PV_to_Pyr_source == 'spike_times':
-			spike_time_func = eval(PV_spike_times['spike_times_func_as_string'])
-			t = PV_spike_times['t']
+		for PV_cell_name in tqdm(PV_pop.cells):
+			temp_PV_gid = PV_pop.name_to_gid[PV_cell_name]
+			temp_n_syns = chosen_PV_n_contacts[temp_PV_gid]
+			PV_pop.connectCells(PV_cell_name, PV_to_Pyr_post_secs, temp_n_syns, 'random', input_source=PV_to_Pyr_source, weight=PV_to_Pyr_weight, delay=PV_output_delay, threshold=spike_threshold) # Adds self.connections to Population
 			
-			stim_times = spike_time_func(PV_spike_times['cells'][PV_cell_name]['soma_v'], spike_threshold)
-			SOM_events = CreateSpikeEvents(PV_pop.outputs, 'PV_pop', PV_cell_name, PV_output_delay, given_stim_times=stim_times)
+			if PV_to_Pyr_source == 'spike_times':
+				spike_time_func = eval(PV_spike_times['spike_times_func_as_string'])
+				t = PV_spike_times['t']
+				
+				stim_times = spike_time_func(PV_spike_times['cells'][PV_cell_name]['soma_v'], spike_threshold)
+				SOM_events = CreateSpikeEvents(PV_pop.outputs, 'PV_pop', PV_cell_name, PV_output_delay, given_stim_times=stim_times)
 
-			
-			# for post_branch in PV_pop.outputs[PV_cell_name]:
-			# 	for i in range(len(PV_pop.outputs[PV_cell_name][post_branch]['netcons'])):
-			# 		for T in stim_times:
-			# 			PV_to_Pyr_events.append(h.FInitializeHandler('nrnpython("PV_pop.outputs[\'{}\'][\'{}\'][\'netcons\'][{}].event({})")'.format(PV_cell_name, post_branch, i, T+PV_output_delay)))
+				
+				# for post_branch in PV_pop.outputs[PV_cell_name]:
+				# 	for i in range(len(PV_pop.outputs[PV_cell_name][post_branch]['netcons'])):
+				# 		for T in stim_times:
+				# 			PV_to_Pyr_events.append(h.FInitializeHandler('nrnpython("PV_pop.outputs[\'{}\'][\'{}\'][\'netcons\'][{}].event({})")'.format(PV_cell_name, post_branch, i, T+PV_output_delay)))
 
 
-	print('\n***WARNING: Assuming isopotential soma and perisomatic PV connections: all PV synapses are placed on soma(0.5)')
+		print('\n***WARNING: Assuming isopotential soma and perisomatic PV connections: all PV synapses are placed on soma(0.5)')
 	
 	# SOM ==> PV
-	print('Connecting SOM population to PV Population (connection weight: {}uS)'.format(SOM_to_PV_weight))
-	n_SOM_to_Pyr_syns = 60
-	for PV_cell in PV_pop.cells:
-		temp_PV_soma = PV_pop.cells[PV_cell]['cell'].soma[0]
-		SOM_pop.connectCells('SOM0', 'voltage', [temp_PV_soma], n_SOM_to_Pyr_syns, 'random', weight=SOM_to_PV_weight, delay=SOM_output_delay, threshold=spike_threshold)
+	if SOM_pop and PV_pop:
+		print('Connecting SOM population to PV Population (connection weight: {}uS)'.format(SOM_to_PV_weight))
+		for PV_cell in PV_pop.cells:
+			SOM_to_PV_post_secs = PV_pop.cells[PV_cell]['basal_dendrites'] + PV_pop.cells[PV_cell]['apical_dendrites']
+			SOM_pop.connectCells('SOM0', SOM_to_PV_post_secs, n_SOM_to_PV_syns, 'random', input_source='voltage', weight=SOM_to_PV_weight, delay=SOM_output_delay, threshold=spike_threshold)
+
+	# SOM ==> Pyr
+	if SOM_pop and Pyr_pop:
+		print('Connecting SOM population to Pyramidal Population (connection weight: {}uS)'.format(SOM_to_Pyr_weight))
+		for Pyr_cell in Pyr_pop.cells:
+			SOM_to_Pyr_post_secs = Pyr_pop.cells[Pyr_cell]['apical_dendrites'] # + Pyr_pop.cells[Pyr_cell]['basal_dendrites']
+			SOM_pop.connectCells('SOM0', SOM_to_Pyr_post_secs, n_SOM_to_Pyr_syns, 'random', input_source='voltage', weight=SOM_to_Pyr_weight, delay=SOM_output_delay, threshold=spike_threshold)
 
 # ============================================== Plot example responses ==============================================
 

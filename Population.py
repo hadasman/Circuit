@@ -2,8 +2,10 @@ import numpy as np
 import os, pdb
 import _pickle as cPickle
 import pandas as pd
-os.chdir('../MIT_spines')
-from Cell import Cell
+# Make sure deleteing the netx 2 lines doesn't make a difference! 
+# Then you can move all my modules to "my_modules" folder and import them using from my_modules.Population import Population
+# os.chdir('../MIT_spines')
+# from Cell import Cell
 from neuron import h, gui
 os.chdir('../Circuit')
 
@@ -86,15 +88,22 @@ class Population():
 		self.cells[cell_name]['soma_v'] = h.Vector()
 		self.cells[cell_name]['soma_v'].record(self.cells[cell_name]['cell'].soma[0](0.5)._ref_v)
 
+		self.cells[cell_name]['soma'] 				= self.cells[cell_name]['cell'].soma[0]
 		self.cells[cell_name]['axons'] 				= [i for i in self.cells[cell_name]['cell'].axon]
 		self.cells[cell_name]['terminals'] 			= [i for i in self.cells[cell_name]['axons'] if len(i.children())==0]
-		self.cells[cell_name]['apical_dendrites']  	= [i for i in self.cells[cell_name]['cell'].apic]
-		self.cells[cell_name]['basal_dendrites']   	= [i for i in self.cells[cell_name]['cell'].dend]
+		if len(self.cells[cell_name]['cell'].apic) > 1:
+			self.cells[cell_name]['apical_dendrites'] = [i for i in self.cells[cell_name]['cell'].apic]
+		else:
+			self.cells[cell_name]['apical_dendrites'] = []
+		if len(self.cells[cell_name]['cell'].dend) > 1:
+			self.cells[cell_name]['basal_dendrites'] = [i for i in self.cells[cell_name]['cell'].dend]
+		else:
+			self.cells[cell_name]['basal_dendrites'] = []
 
 		# Return to original dir
 		os.chdir(original_path)
 
-	def connectCells(self, pre_cell_name, post_branches, n_syns, dist, weight=0.5, delay=0, threshold=0):
+	def connectCells(self, pre_cell_name, post_branches, n_syns, dist, input_source='voltage', weight=0.5, delay=0, threshold=0):
 		def synLocations(L, n_syns, dist):
 			"""
 			Returns synapse location according to given distribution, in arbitrary units (fraction [0-1]).
@@ -128,7 +137,7 @@ class Population():
 
 			return locs
 
-		def addInhSynapses(branch, output_dict, delay=delay, weight=weight, threshold=threshold, Dep=0, Fac=0):
+		def addInhSynapses(input_source, branch, output_dict, delay=delay, weight=weight, threshold=threshold, Dep=0, Fac=0):
 			'''locs and preysnaptics should be arrays ordered identically, for synapse location on postsynaptic branch (locs) and
 			presynaptic partner (presynaptics)
 			Inputs:
@@ -149,7 +158,6 @@ class Population():
 				synapses.append(h.ProbUDFsyn2_lark(locs[i], sec = branch))
 				conductances.append(h.Vector().record(synapses[-1]._ref_g))
 				currents.append(h.Vector().record(synapses[-1]._ref_i))
-				netcons.append(h.NetCon(presyn_seg[i]._ref_v, synapses[-1], sec=presyn_seg[i].sec))
 
 				synapses[-1].tau_r 	= 0.18
 				synapses[-1].tau_d 	= 5
@@ -160,14 +168,21 @@ class Population():
 				synapses[-1].u0 	= 0
 				synapses[-1].gmax 	= 0.001 # don't touch - weight conversion factor to (us) (later multiplied by the conductance in nS)
 
-				netcons[-1].weight[0] = weight # In units nS
-				netcons[-1].delay 	  = delay
-				netcons[-1].threshold = threshold
+
+				if input_source == 'voltage':
+					netcons.append(h.NetCon(presyn_seg[i]._ref_v, synapses[-1], sec=presyn_seg[i].sec))
+					netcons[-1].delay 	  = delay
+					netcons[-1].threshold = threshold
+
+				elif input_source == 'spike_times':
+					netcons.append(h.NetCon(None, synapses[-1]))
+
+				netcons[-1].weight[0] = weight # In units nS								
 
 			output_dict['synapses'] = synapses
-			output_dict['netcons'] = netcons
-			output_dict['syn_g'] = conductances
-			output_dict['syn_i'] = currents
+			output_dict['netcons']  = netcons
+			output_dict['g_GABA']    = conductances
+			output_dict['i_GABA']    = currents
 
 			return output_dict
 
@@ -179,29 +194,19 @@ class Population():
 										'stim_axon_segs': [], 
 										'synapses': [], 
 										'netcons': [],
-										'syn_g': []}  for post_branch in post_names}
+										'g_GABA': [],
+										'i_GABA': []}  for post_branch in post_names}
 
 		for post_branch in self.outputs[pre_cell_name]:
 			post_branch_obj = [i for i in post_branches if post_branch in i.name()][0]
 			self.outputs[pre_cell_name][post_branch]['locs'] = synLocations(post_branch_obj.L, n_syns, dist)
 			self.outputs[pre_cell_name][post_branch]['stim_axon_segs']    = pre_branches
 			# Think about weight, delay (synaptic), threshold and noise (stochastic firing)
-			self.outputs[pre_cell_name][post_branch] = addInhSynapses(post_branch_obj, 
+			self.outputs[pre_cell_name][post_branch] = addInhSynapses(input_source, post_branch_obj, 
 																		self.outputs[pre_cell_name][post_branch],
 																		Dep=0)
 
-	def moveCell(self, cell, dx, dy, dz):
-		'''
-		Moves cell morphology.
-		When changing 3d coordinates of reconstructed cells, only change the soma location! 
-		The rest will follow because it's connected: when a section is moved all of its children apparently move too.
-		'''
-
-		soma = cell.soma[0]
-		for i in range(soma.n3d()):
-			h.pt3dchange(i, soma.x3d(i)+dx, soma.y3d(i)+dy, soma.z3d(i)+dz, soma.diam, sec=soma)
-
-	def addInput(self, cell_name, cell_gid, thalamic_activations_filename = '', thalamic_connections_filename='', weight=0.4, axon_gids=None):
+	def addInput(self, cell_name, thalamic_activations_filename = '', connecting_gids=[], weight=0.4, axon_gids=None):
 
 		def checkValidFilename(filename, cond='', which_standard=None):	
 			ok = 0	
@@ -230,15 +235,8 @@ class Population():
 			os.chdir(original_path)
 			return filename
 		
-		def getInputs(cell_gid, thalamic_activations, thalamic_connections_filename):
-			thal_connections = pd.read_pickle(thalamic_connections_filename)
-			connecting_gids = []
+		def getInputs(thalamic_activations, connecting_gids):
 			
-			# Find thalamic GIDs connecting the the pyramidal cell
-			for con in thal_connections.iterrows():
-				if con[1].post_gid == cell_gid:
-					connecting_gids.append([con[1].pre_gid, con[1].contacts]) # [presynaptic gid, no. of contacts]
-
 			# Get tha thalamic activation timings and no. of contacts on the pyramidal cell
 			cell_inputs = {i[0]: {'contacts': i[1], 'times': []} for i in connecting_gids}
 
@@ -296,17 +294,14 @@ class Population():
 			return synapses, netcons, g_AMPA, g_NMDA, i_AMPA, i_NMDA
 
 		# Check filenames are valid
-		thalamic_connections_filename = checkValidFilename(thalamic_connections_filename, cond='exist')
-		thalamic_connections_filename = checkValidFilename(thalamic_connections_filename, cond='in_dir')
-
 		thalamic_activations_filename = checkValidFilename(thalamic_activations_filename, cond='exist')
 		thalamic_activations_filename = checkValidFilename(thalamic_activations_filename, cond='in_dir')
 
 		thalamic_activations = cPickle.load(open(thalamic_activations_filename, 'rb'))
 
 		# For the given cell, find: presynaptic thalamic GIDs, no. of contacts each one makes and their activation timings
-		print('\n- Finding presynaptic contacts for cell {}'.format(cell_name))
-		cell_inputs = getInputs(cell_gid, thalamic_activations, thalamic_connections_filename)
+		# print('\n- Finding presynaptic contacts for cell {}'.format(cell_name))
+		cell_inputs = getInputs(thalamic_activations, connecting_gids)
 		
 		# Add thalamic activation as synapses to cell
 		cell_obj 	 = self.cells[cell_name]['cell']
@@ -315,11 +310,12 @@ class Population():
 		# branches = [self.cells[cell_name]['cell'].soma[0]]
 
 		# CHECK THIS!
-		print('\n- Adding thalamo-cortical synapses (on BASAL dendrites)')
+		# print('\n- Adding thalamo-cortical synapses (on BASAL dendrites)')
 		self.inputs[cell_name] = {}	
 		for thal_gid in cell_inputs:
 			n_syns 		= cell_inputs[thal_gid]['contacts']
 			stim_times 	= cell_inputs[thal_gid]['times']
+
 
 			contact_locs_dict = synLocationsAll(branches, n_syns)
 
@@ -335,15 +331,64 @@ class Population():
 			self.inputs[cell_name]['thalamic_gid_{}'.format(thal_gid)]['i_AMPA']   = temp_i_AMPA
 			self.inputs[cell_name]['thalamic_gid_{}'.format(thal_gid)]['i_NMDA']   = temp_i_NMDA
 
+	def moveCell(self, cell, dx, dy, dz):
+		'''
+		Moves cell morphology.
+		When changing 3d coordinates of reconstructed cells, only change the soma location! 
+		The rest will follow because it's connected: when a section is moved all of its children apparently move too.
+		'''
+
+		soma = cell.soma[0]
+		for i in range(soma.n3d()):
+			h.pt3dchange(i, soma.x3d(i)+dx, soma.y3d(i)+dy, soma.z3d(i)+dz, soma.diam, sec=soma)
+
+	def dumpSomaVs(self, t, thalamic_activations_filename):
+		'''
+		Inputs:
+			- t: hoc vector of recorded time (h._ref_t)
+			- filename: file name (including path), in which to save the spike times
+		
+		Returns:
+		Dictionary: {cell_name:{
+								'soma_v': hoc vector with recorded soma voltages of the cell named <cell_name>
+								'gid': assigned gid (from BB database) of cell named <cell_name>
+								'spiks_times_func_as_string': function to extract spike times from 'soma_v', 
+															  according to threshold given as argument to this function. 
+															  This is a lambda function represented as a STRING, because 
+															  lambda functions cannot be pickled. After loading this 
+															  variable, call eval() on the string to use the function.
+								}
+					}
+		'''
+
+		soma_vs = {}
+
+		soma_vs['spike_times_func_as_string'] = 'lambda soma_v, threshold: [t[i] for i in range(1, len(soma_v)-1)' + \
+																			' if soma_v[i] > threshold' + \
+																			' and soma_v[i-1] < soma_v[i]' + \
+																			' and soma_v[i+1] < soma_v[i]]'
+		
+		soma_vs['cells'] = {i: {'soma_v': self.cells[i]['soma_v'],
+								'gid': self.name_to_gid[i]} 
+				  			 for i in self.cells}
+
+		soma_vs['t'] = t
+
+		filename = 'thalamocortical_Oren/SSA_spike_times/PV_spike_times/PV_spike_times_tstop_' + str(int(h.tstop)) + '_' + thalamic_activations_filename.split('/')[-1]   
+		if filename[-2:] != '.p':
+			filename = filename + '.p'
+		cPickle.dump(soma_vs, open(filename, 'wb'))
+		print('Dictionary with {} soma voltages saved to {}'.format(self.population_name, filename))
 
 
-
-
-
-
-
-
-
+		# soma_vs['cells'] = {i: {'soma_v': self.cells[i]['soma_v'],
+		# 						'gid': self.name_to_gid[i],
+		# 						'inputs': [[self.inputs[i][axon]['stim_times'] for axon in self.inputs[i]],
+		# 									[self.inputs[i][axon]['g_AMPA'] for axon in self.inputs[i]],
+		# 									[self.inputs[i][axon]['g_NMDA'] for axon in self.inputs[i]],
+		# 									[self.inputs[i][axon]['i_AMPA'] for axon in self.inputs[i]],
+		# 									[self.inputs[i][axon]['i_NMDA'] for axon in self.inputs[i]]]} 
+		# 		  			 for i in self.cells}
 
 
 

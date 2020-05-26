@@ -5,121 +5,33 @@ from __future__ import division
 from math import *
 from numpy import *
 from scipy.optimize import least_squares
-import os, multiprocessing, time, pickle
+import os, multiprocessing, time
+import _pickle as cPickle
 import numpy as np
 from matplotlib.cbook import flatten
 from tqdm import tqdm
 
+from worker_functions import *
+from SSA_Stim import *
 
 def SSA_protocol_stimulations(experiment, SSA):
-    class Stim:
-        def __init__(self, SSAType, Standard, Deviant, StandPro, DeviPro, Presentations):
-            self.SSAType        = SSAType
-            self.Standard       = Standard
-            self.Deviant        = Deviant
-            self.StandPro       = StandPro
-            self.DeviPro        = DeviPro
-            self.Presentations  = Presentations
-
-        def NoSSA(seed):
-            # Random tones on a scale (equal probability for each tone)
-            jumps = 0.2
-            AudStims = list(2**(arange(0, 4+jumps, jumps) + log2(2000))) * 20
-            print('%i tone presentations'%len(AudStims))
-            print('******')
-            
-            rndd = np.random.RandomState(seed)
-            rndd.shuffle(AudStims)
-            rndd.shuffle(AudStims)
-            rndd.shuffle(AudStims)
-            rndd.shuffle(AudStims)
-
-            return AudStims
-
-        def TwoStims(self):
-            AudStims = [self.Standard]*int(self.StandPro*self.Presentations) + [self.Deviant]*int(self.DeviPro*self.Presentations)
-            
-            return AudStims
-
-        def DeviantAlone(self):
-            AudStims = [self.Standard]*int(self.DeviPro*self.Presentations) + [self.Deviant]*int(self.StandPro*self.Presentations)
-
-            return AudStims
-
-        def TwoStimsPeriodic(self):
-            standard_per_period = int(round(self.StandPro/self.DeviPro))
-            n_periods = int(round(self.Presentations*self.DeviPro))
-
-            AudStims = list(flatten([[self.Standard]*standard_per_period + [self.Deviant] for t in range(n_periods)]))
-
-            return AudStims
-
-        def TwoStimsPeriodicP9_29(self):
-            AudStims= list(flatten([self.Deviant] + [[self.Standard]*9 + [self.Deviant] + [self.Standard]*29 + [self.Deviant] for i in range(12)] + [self.Standard]*19))
-
-            return AudStims
-
-        def DiverseNarrow_T_or_Exp(self, d_octave, n_extend):  
-            # T: d_octave = 5, n_extend = 2
-            # Exp: d_octave = 11, n_extend = 4
-            if self.Deviant<self.Standard: raise Exception("Deviant should be bigger than Standard, just a def")
-
-            AudStims = []
-            
-            df = (log2(self.Deviant) - log2(self.Standard))/d_octave # Number (fraction) of octaves between consecutive frequencies
-            
-            LowestFreq = log2(self.Standard) - n_extend*df
-            
-            DiverseNarrow = [int(round(2**(LowestFreq + i*df))) for i in range(d_octave+(n_extend*2)+1)]
-            
-            frac_repetitions = 1 / len(DiverseNarrow)
-
-            [AudStims.extend([freq]*int(frac_repetitions*self.Presentations)) for freq in DiverseNarrow]
-
-            return AudStims
-
-        def DiverseBroad(self, DiverseBroadProbs, SSAType, n_extend=2, d_octave=1):
-            # Same as narrow, different probabilities (nonuniform) and parameters (I'm too lazy to merge)
-            # 1 rounding difference between Oren's original and this; I guess it doesn't matter and this is more readable
-            if Deviant<Standard: raise Exception("Deviant should be bigger than Standard, just a def")
-            if SSAType == 'DiverseBroadExp': 
-                n_extend = 5
-                d_octave = 1
-                raise Exception('This will not work until I have a larger column')
-
-            AudStims = []
-            
-            df = ((log2(self.Deviant) - log2(self.Standard))) / d_octave
-            
-            LowestFreq = log2(self.Standard) - n_extend*df
-            
-            DiverseBroad = [int(round(2**(LowestFreq + i*df))) for i in range(d_octave + (n_extend*2) + 1)]
-
-            # Each stimulus appears according to its probability
-            [AudStims.extend([freq]*int(DiverseBroadProbs[s]*self.Presentations)) for s,freq in enumerate(DiverseBroad)]
-
-            return AudStims
 
     ssa_presentations_seed = experiment['ssa_presentations_seed']
+    StandDeviCouples    = [experiment['stand_dev_couple']]
+    SSAType             = experiment['SSAType']
+    StandPro            = experiment['ssa_standard_probability']
+    Presentations       = experiment['ssa_presentations']        
 
     if not SSA:
-        stimulus = Stim(SSA)
+        stimulus = SSA_Stim(SSA)
         NoSSA(ssa_presentations_seed)
         return(AudStims)
     
-    elif SSA:
-        print 'SSA exps'
-        StandDeviCouples    = [experiment['stand_dev_couple']]
-        SSAType             = experiment['SSAType']
-        StandPro            = experiment['ssa_standard_probability']
-        Presentations       = experiment['ssa_presentations']        
-        
+    elif SSA:      
         #ISI = 300
         DeviPro  = round(1 - StandPro,3)
         for Standard, Deviant in StandDeviCouples:
-            stimulus = Stim(SSAType, Standard, Deviant, StandPro, DeviPro, Presentations)
-
-            ChangeStim = []
+            stimulus = SSA_Stim(SSAType, Standard, Deviant, StandPro, DeviPro, Presentations)
 
             if SSAType in ['TwoStims', 'Equal']: #Two Stims
                 if SSAType =='Equal':
@@ -175,8 +87,8 @@ def SSA_protocol_stimulations(experiment, SSA):
                 AudStims = stimulus.DiverseBroad(DiverseBroadProbs, SSAType, n_extend=n_extend, d_octave=1)
                 
                 assert len(AudStims) == Presentations, 'DiverseBroadProbs[x]*Presentations is not an int!'
-                assert Standard in AudStims, 'Standard ({}) not in AudStims'.format(Standard)
-                assert Deviant in AudStims, 'Deviant ({}) not in AudStims'.format(Deviant)
+                assert Standard in AudStims, 'Standard ({}Hz) not in AudStims'.format(Standard)
+                assert Deviant in AudStims, 'Deviant ({}Hz) not in AudStims'.format(Deviant)
                 
                 print(set(AudStims))
 
@@ -189,59 +101,52 @@ def SSA_protocol_stimulations(experiment, SSA):
                 rndd.shuffle(AudStims)
                         
             return(AudStims)
- 
+
+# Keep this function definition in global workspace so multiprocessing has access to it
+def worker_job(gid_seed):
+    '''
+    worker for the parallel 
+    '''
+    axon_gid, Base_Seed, responsive = gid_seed
+    axon_activity_vars = {axon_gid: {}}
+
+    if experiment['stim_type'] in ['step', 'alpha_func']:
+        axon_activity_vars[axon_gid]['prefered_freq'], \
+        axon_activity_vars[axon_gid]['shuffled_neuron']         = set_pref_frequency(axon_gid, experiment)
+        
+        axon_activity_vars[axon_gid]['axon_stim_firing_rate']   = get_axon_stim_firing_rate(axon_gid, experiment)
+
+        axon_activity_vars[axon_gid]['width_value']             = get_tuning_width(axon_gid, experiment)
+
+        axon_activity_vars[axon_gid]['duration_of_stim']        = get_duration_of_stims(experiment['duration_of_stim'])
+
+        axon_activity_vars[axon_gid]['duration_between_stims']  = experiment['duration_between_stims']
+        axon_activity_vars[axon_gid]['first_stimulus_time']     = experiment['first_stimulus_time']
+   
+    if experiment['stim_type'] in ['alpha_func']:
+        axon_activity_vars[axon_gid]['alpha_func_delay'], axon_activity_vars[axon_gid]['alpha_func_tau'] = get_alpha_params(axon_gid, experiment)
+   
+    if not responsive: #disable active fr of axon
+        axon_activity_vars[axon_gid]['axon_stim_firing_rate'] = 1.0/9e9
+
+    axon_activity_vars[axon_gid]['time_to_firing_rate_frequency'] =  create_time_to_spike_frequency_func(experiment, axon_activity_vars[axon_gid])
+    
+
+    axon_activity_vars[axon_gid]['spike_times'] = np.array(get_spike_times(rnd_stream = np.random.RandomState([int(axon_gid),Base_Seed]) , 
+                                                                           time_to_firing_rate_frequency = axon_activity_vars[axon_gid]['time_to_firing_rate_frequency'],
+                                                                           stim_end_time = experiment['simulation_end_time']))
+    
+    # need to delete for multiprocessing
+    axon_activity_vars[axon_gid]['time_to_firing_rate_frequency']   = []
+    axon_activity_vars[axon_gid]['alpha_func_delay']                = []
+    axon_activity_vars[axon_gid]['duration_of_stim']                = [] 
+    
+    return(axon_gid, axon_activity_vars)
+
 def create_axons_spikes(seed, experiment, save_path=None, save_name=None):
     '''
     save_path should be the link to the spike file to which you want to write the spike_times
     '''
-    def worker_job(gid_seed):
-        '''
-        worker for the parallel 
-        '''
-        axon_gid, Base_Seed, responsive = gid_seed
-        axon_activity_vars = {axon_gid: {}}
-
-        if experiment['stim_type'] in ['step', 'alpha_func']:
-            axon_activity_vars[axon_gid]['prefered_freq'], \
-            axon_activity_vars[axon_gid]['shuffled_neuron']         = set_pref_frequency(axon_gid, experiment)
-            
-            axon_activity_vars[axon_gid]['axon_stim_firing_rate']   = get_axon_stim_firing_rate(axon_gid, experiment)
-            
-            axon_activity_vars[axon_gid]['width_value']             = get_tuning_width(axon_gid, experiment)
-            
-            axon_activity_vars[axon_gid]['duration_of_stim']        = get_duration_of_stims(experiment['duration_of_stim'])
-            
-            axon_activity_vars[axon_gid]['duration_between_stims']  = experiment['duration_between_stims']
-            axon_activity_vars[axon_gid]['first_stimulus_time']     = experiment['first_stimulus_time']
-        
-        if experiment['stim_type'] in ['alpha_func']:
-            axon_activity_vars[axon_gid]['alpha_func_delay']        = get_alpha_func_delay(axon_gid, experiment)
-            axon_activity_vars[axon_gid]['alpha_func_tau']          = get_alpha_func_tau(axon_gid, experiment)
-        
-        if not responsive: #disable active fr of axon
-            axon_activity_vars[axon_gid]['axon_stim_firing_rate'] = 1.0/9e9
-
-        axon_activity_vars[axon_gid]['time_to_firing_rate_frequency'] =  create_time_to_spike_frequency_func(experiment, axon_activity_vars[axon_gid])
-        
-
-        axon_activity_vars[axon_gid]['spike_times']                   = np.array(get_spike_times(rnd_stream = np.random.RandomState([int(axon_gid),Base_Seed]) , time_to_firing_rate_frequency = axon_activity_vars[axon_gid]['time_to_firing_rate_frequency'],
-                                                                                            stim_end_time = experiment['simulation_end_time'] ))
-        
-        # need to delete for multiprocessing
-        axon_activity_vars[axon_gid]['time_to_firing_rate_frequency']   = []
-        axon_activity_vars[axon_gid]['alpha_func_delay']                = []
-        axon_activity_vars[axon_gid]['duration_of_stim']                = [] 
-        
-        return(axon_gid, axon_activity_vars)
-
-
-
-
-
-
-
-
-
     axon_activity_vars = {}
     axons_gids = experiment['axons_settings'][0].keys()
 
@@ -261,7 +166,6 @@ def create_axons_spikes(seed, experiment, save_path=None, save_name=None):
     if save_path:
         assert save_name
         print(save_path)
-
         f = open(save_path +'/' + save_name,'w')
         f.write('/scatter\n')
         sps = [zip(*[axon_activity_vars[axon_gid]['spike_times'],[axon_gid]*len(axon_activity_vars[axon_gid]['spike_times'])]) for axon_gid in axon_activity_vars]
@@ -273,24 +177,25 @@ def create_axons_spikes(seed, experiment, save_path=None, save_name=None):
         # look here if you like to save the axons parameters
         #pickle.dump(experiment,open(save_path +'/exp' + save_name,'wb'))
     
-    return(spike_times_txt, axon_activity_vars)
-
+    # return(spike_times_txt, axon_activity_vars)
+    return axon_activity_vars
 
 
 
 
 ###Example Run -
-if __name__ == __main__ :
+if __name__ == '__main__' :
 
-    AxoGidToXY = pickle.load(open(os.environ['HOME'] + 'Documents/GitHubProjects/Circuit/thalamocortical_Oren/thalamic_data/AxoGidToXY.p','r'), encoding='latin1') #<<--- fix this path!
+    AxoGidToXY = cPickle.load(open('thalamocortical_Oren/thalamic_data/AxoGidToXY.p','rb'), encoding='latin1') #<<--- fix this path!
     experiment = {'axons_settings': [AxoGidToXY],
                   'prefered_frequency_distribution': 'tonotopic',
+                  'prefered_frequency_distribution_shuffle_percent': 0,
                   'ssa_presentations': 500,
                   'ssa_standard_probability': 0.95,
                   'ssa_presentations_seed': 1,
                   'prefered_frequency_boundaries': [4000, 16000], # 2 octvaes
 
-                  'tunnig_curve_type': 'triangle', # Options: 'exp', 'triangle'
+                  'tuning_curve_type': 'triangle', # Options: 'exp', 'triangle'
                   
                   'stim_type': 'alpha_func',
                   'duration_of_stim': 300,
@@ -348,17 +253,17 @@ if __name__ == __main__ :
 
     experiment['simulation_end_time'] = (experiment['duration_between_stims'] + experiment['duration_of_stim'])*experiment['ssa_presentations'] + experiment['first_stimulus_time']
     simulation_duration = experiment['simulation_end_time']   # bilogical time
-    save_path = '.'#directory to save the files in 
+    save_path = 'test_times'#directory to save the files in 
 
     def run_experiment(Standard, Deviant, BS, spike_replay_name):
         # spike_replay_name: Path to save spike times
 
         experiment['stand_dev_couple'] = [Standard, Deviant]
         experiment['frequencies']      = SSA_protocol_stimulations(experiment, SSA)
-        _, axon_activity_vars          = create_axons_spikes(BS, experiment, save_path=save_path, save_name =spike_replay_name )
+        axon_activity_vars          = create_axons_spikes(BS, experiment, save_path=save_path, save_name =spike_replay_name )
 
-    run_experiment(6666, 9600, 106746, 'input6666_106746.dat')
-    run_experiment(9600, 6666, 109680, 'input9600_109680.dat')
+    run_experiment(6666, 9600, 106746, 'input6666_106746_3.dat')
+    run_experiment(9600, 6666, 109680, 'input9600_109680_3.dat')
 
 
 

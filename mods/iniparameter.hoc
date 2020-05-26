@@ -1,0 +1,153 @@
+/********************************************************************
+Taken from Grunditz A, Holbro N, Tian L, Zuo Y and Oertner TG
+Spine neck plasticity controls postsynaptic calcium signals through
+electrical compartmentalization
+J Neuroscience (2008) 28: 13457-13466
+*************************************************/
+
+/********************************************************************
+section list of all apical dendrites          
+*************************************************/
+objref all_apicals
+all_apicals = new SectionList()
+dendA5_0 all_apicals.subtree()
+
+
+/********************************************************************
+section list of all basal dendrites            
+*************************************************/
+objref all_basals
+all_basals = new SectionList()
+dendA1_0 all_basals.subtree()
+dendA2_0 all_basals.subtree()
+dendA3_0 all_basals.subtree()
+dendA4_0 all_basals.subtree()
+
+
+/********************************************************************
+section list of primary apical branch          
+*************************************************/
+objref primary_apical_list
+primary_apical_list = new SectionList()
+dendA5_0 primary_apical_list.append
+dendA5_01 primary_apical_list.append
+dendA5_011 primary_apical_list.append
+dendA5_0111 primary_apical_list.append
+dendA5_01111 primary_apical_list.append
+dendA5_011111 primary_apical_list.append
+dendA5_0111111 primary_apical_list.append
+dendA5_01111111 primary_apical_list.append
+dendA5_011111111 primary_apical_list.append
+dendA5_0111111111 primary_apical_list.append
+dendA5_01111111111 primary_apical_list.append
+dendA5_011111111111 primary_apical_list.append
+dendA5_0111111111111 primary_apical_list.append
+dendA5_01111111111111 primary_apical_list.append
+dendA5_011111111111111 primary_apical_list.append
+dendA5_0111111111111111 primary_apical_list.append
+dendA5_01111111111111111 primary_apical_list.append
+dendA5_011111111111111111 primary_apical_list.append
+dendA5_0111111111111111111 primary_apical_list.append
+
+/* reset nseg in primary apical so none smaller than 5 microns */
+
+forsec primary_apical_list { ns=int(L/5+0.5)
+        if (ns==0) {
+             ns=1
+        }
+        if ((ns-int(ns/2)*2)==0) {
+             ns=ns+1
+        }
+        nseg = ns
+}
+
+
+
+/********************************************************************
+initialize basic parameters                    
+*************************************************/
+celsius = 30        /* temperature */
+v_init=-65
+global_ra=150.00 	/* internal resistivity in ohm-cm */
+Cm=0.75             /* specific membrane capacitance in uF/cm^2 */
+Rm=40000            /* specific membrane resistivity in ohm-cm^2 */ 
+Vleak=-65           /* leak reversal -65mV */
+Vrest=-65           /* resting potential -64.6 mV*/
+isegfactor=100
+isegfrac=0.8
+spinelimit=100      /* distance beyond which to modify for spines */
+spinefactor=2.0     /* factor by which to change passive properties */
+
+
+/********************************************************************
+procedure to insert and initialize channels    
+*************************************************/
+proc initchannels(){
+
+/* passive properties */
+
+print "Inserting passive membrane properties"
+forall {insert pas  g_pas=1/(Rm)  Ra=global_ra  e_pas=Vleak 
+}
+
+/* soma active properties */
+
+somaA {insert pas	e_pas=Vleak  g_pas=1/Rm   Ra=global_ra  cm=Cm
+}
+
+/* basal dendrites active properties */
+
+forsec all_basals {insert pas	e_pas=Vleak  g_pas=1/Rm   Ra=global_ra  cm=Cm
+}
+
+dendA5_00{
+    insert cadiffus
+}
+
+access somaA
+area(0.5)
+distance()
+
+/* procedure to insert channels and set parameters in apical dendrites */
+
+forsec all_apicals {
+
+    /* do passive properties; modify for spines if far enough out */    
+
+    insert pas	e_pas=Vleak  Ra=global_ra 
+    for (x) { xdist=distance(x)
+              if (xdist<=spinelimit) {
+                 g_pas(x)=1/Rm
+                 cm(x)=Cm
+              } else {
+                 g_pas(x)=spinefactor/Rm
+                 cm(x)=spinefactor*Cm
+              }
+    }
+    }
+}
+
+print "Passive properties and channels are initialized"
+
+
+
+
+/********************************************************************
+section list of the spine - written in python code now           
+
+objref all_spines
+all_spines = new SectionList()
+spine_head all_spines.append
+spine_neck all_spines.append
+
+spine_head {
+    insert pas  e_pas=Vleak  g_pas=spinefactor/Rm  Ra=global_ra  cm=spinefactor*Cm 
+    insert car
+    insert cadiffus
+    insert canmda
+}
+spine_neck{
+    insert pas  e_pas=Vleak  g_pas=spinefactor/Rm  Ra=global_ra  cm=spinefactor*Cm 
+    insert cadiffus
+}
+*************************************************/

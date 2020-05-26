@@ -1,0 +1,42 @@
+/********************************************************************
+Taken from Grunditz A, Holbro N, Tian L, Zuo Y and Oertner TG
+Spine neck plasticity controls postsynaptic calcium signals through
+electrical compartmentalization
+J Neuroscience (2008) 28: 13457-13466
+*************************************************/
+
+
+
+/********************************************************************
+Create a spine with a spine neck 
+connected to the parant dendrite dendA5_00
+*************************************************/
+
+{create spine_neck}
+{dendA5_00 connect spine_neck(0),0.8}
+{access spine_neck}
+necklength = 1  /*spine neck length in um*/
+neckdiam = 0.0394 /*spine neck diameter*/
+spine_neck {nseg = 2
+            pt3dclear()
+            for j = 0, nseg-1 {
+                ty = (j*necklength)/(nseg-1)
+                pt3dadd(97.58,ty,20.87,neckdiam)
+                }
+            }
+
+{create spine_head}
+{spine_neck connect spine_head(0), 1}
+{access spine_head}
+spineradius = 0.297
+spine_head {nseg = 7
+            pt3dclear()
+            for i = 0, nseg-1 {
+                ty = -(i*2*spineradius)/(nseg-1)
+                td = 2*sqrt(spineradius^2-(ty+spineradius)^2)
+                if (td<neckdiam){
+                    td = neckdiam
+                    } 
+                    pt3dadd(97.58,ty+1,20.87,td)
+                }
+            }

@@ -1,0 +1,48 @@
+{\rtf1\ansi\ansicpg1252\cocoartf1671\cocoasubrtf600
+{\fonttbl\f0\fswiss\fcharset0 ArialMT;\f1\fmodern\fcharset0 Courier;\f2\fmodern\fcharset0 Courier-Bold;
+}
+{\colortbl;\red255\green255\blue255;\red26\green26\blue26;\red255\green255\blue255;\red38\green38\blue38;
+\red255\green236\blue236;\red117\green117\blue117;\red0\green0\blue213;}
+{\*\expandedcolortbl;;\cssrgb\c13333\c13333\c13333;\cssrgb\c100000\c100000\c100000;\cssrgb\c20000\c20000\c20000;
+\cssrgb\c100000\c94118\c94118;\cssrgb\c53333\c53333\c53333;\cssrgb\c0\c0\c86667;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww10800\viewh8400\viewkind0
+\deftab720
+\pard\pardeftab720\sl220\partightenfactor0
+
+\f0\fs20 \cf2 \cb3 \expnd0\expndtw0\kerning0
+\outl0\strokewidth0 \strokec2 See these 3 files\
+cells_detailes.pkl - the location of each cell (including the type of the cell its layer...)\cb1 \
+\cb3 Thalamic_axons_location.pkl - the location\'a0of the thalamic axons\cb1 \
+\cb3 Thalamo_cortical_connectivity.pkl - connectivity from the thalamus to the neocortex\cb1 \
+\
+\
+\cb3 example -\'a0\
+\pard\pardeftab720\sl220\partightenfactor0
+\cf2 \cb1 \
+\pard\pardeftab720\sl325\partightenfactor0
+
+\f1 \cf4 \cb3 \strokec4 cells = pd.read_pickle(\cb5 "...cells_detailes.pkl"\cb3 )\
+df2 = pd.read_pickle(\cb5 "...Thalamo_cortical_connectivity.pkl"\cb3 )\
+axons_locs = pd.read_pickle(\cb5 "...Thalamic_axons_location.pkl"\cb3 )\
+cells.plot.scatter(\cb5 'x'\cb3 ,\cb5 'z'\cb3 )\
+axons_locs.plot.scatter(\cb5 'x'\cb3 ,\cb5 'z'\cb3 ,ax=gca(),color=\cb5 'red'\cb3 )\
+\pard\pardeftab720\sl325\partightenfactor0
+\cf6 \strokec6 # to avoid edge effect it is better to filter the axons (depending on the question)\cf4 \strokec4 \
+filtered_axons = axons_locs[(axons_locs.x<
+\f2\b \cf7 \strokec7 450
+\f1\b0 \cf4 \strokec4 ) & (axons_locs.x>
+\f2\b \cf7 \strokec7 250
+\f1\b0 \cf4 \strokec4 ) &(axons_locs.z>
+\f2\b \cf7 \strokec7 500
+\f1\b0 \cf4 \strokec4 )&(axons_locs.z<
+\f2\b \cf7 \strokec7 700
+\f1\b0 \cf4 \strokec4 )]\
+filtered_axons.plot.scatter(\cb5 'x'\cb3 ,\cb5 'z'\cb3 ,ax=gca(),color=\cb5 'green'\cb3 )\
+\
+legend([\cb5 'cortical cells'\cb3 ,\cb5 'thalamic axons'\cb3 ,\cb5 '"filtered thalamic axons"'\cb3 ])\cb1 \
+\
+\pard\pardeftab720\sl325\partightenfactor0
+\cf4 \
+\pard\pardeftab720\sl240\partightenfactor0
+\cf4 \cb3 \
+}
