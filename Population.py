@@ -13,7 +13,7 @@ from tkinter import messagebox
 
 class Population():
 
-	def __init__(self, population_name, morph_path, template_path, template_name, verbose=True):
+	def __init__(self, population_name, morph_path, template_path, template_name, verbose=False):
 
 		self.cells 				= {}
 		self.population_name 	= population_name
@@ -22,6 +22,7 @@ class Population():
 		self.template_name 		= template_name
 		self.verbose 			= verbose
 		self.inputs 			= {}
+		self.cell_inputs		= {}
 		self.outputs 			= {}
 		self.name_to_gid 		= {}
 		self.loadTemplate()
@@ -48,15 +49,16 @@ class Population():
 
 		constants_loaded = h.load_file('constants.hoc')
 		morphology_loaded = h.load_file('morphology_%s.hoc'%self.template_name)
+
 		biophysics_loaded = h.load_file('biophysics_%s.hoc'%self.template_name)
 
 		error = 'Can\'t find hoc file! Did you create it and call it by the correct name?'
 		if not constants_loaded:
-			_ = messagebox.showinfo(message=error, title='constants.hoc')
+			print('WARNING: {} hoc file not loaded! Did you create it and call it by the correct name?'.format(constants))
 		if not morphology_loaded:
-			_ = messagebox.showinfo(message=error, title='morphology.hoc')
+			print('WARNING: {} hoc file not loaded! Did you create it and call it by the correct name?'.format(morphology))
 		if not biophysics_loaded:
-			_ = messagebox.showinfo(message=error, title='biophysics.hoc')
+			print('WARNING: {} hoc file not loaded! Did you create it and call it by the correct name?'.format(biophysics))
 
 
 		if self.verbose:
@@ -103,41 +105,59 @@ class Population():
 		# Return to original dir
 		os.chdir(original_path)
 
-	def connectCells(self, pre_cell_name, post_branches, n_syns, dist, input_source='voltage', weight=0.5, delay=0, threshold=0):
-		def synLocations(L, n_syns, dist):
+	def connectCells(self, post_cell_name, pre_pop, pre_cell_name, post_branches, n_syns, dist, input_source='voltage', weight=0.5, delay=0, threshold=0):
+		# ** self if post_pop ** 
+		def synLocations(post_branches, n_syns, dist):
 			"""
 			Returns synapse location according to given distribution, in arbitrary units (fraction [0-1]).
 			Arbitrary units (relative to branch length) is the way NEURON receives synapse locations.
 			"""
-			ok = 0
-			density = n_syns / L
 
-			while not ok:
-				if dist == 'uniform':
-					ok = 1
+			assert dist in ['uniform', 'random', 'one'], 'Which synapse distribution for %s population? (uniform/random/one) '%self.population_name
+			
+			n_branches = len(post_branches)
+			branch_locs = {}
+			
+			if dist == 'uniform':
+				raise Exception('uniform', '{} dist is under construction!'.format(dist))
+				# density = n_syns / L
+				# locs = sorted(np.arange(0, L, 1/density))
+				# locs = [i/L for i in locs]
 
-					locs = sorted(np.arange(0, L, 1/density))
-					locs = [i/L for i in locs]
+				# assert len(locs)==n_syns, ['Sanity check warning: unexpected locs length!', pdb.set_trace()]
 
-					assert len(locs)==n_syns, ['Sanity check warning: unexpected locs length!', pdb.set_trace()]
-
-				elif dist == 'random':
-					ok = 1
-									
-					locs = np.random.rand(n_syns)
-					locs = sorted(i/L for i in locs)
+			elif dist == 'random':
 				
-				elif dist == 'one':
-					ok = 1
+				for i in range(n_syns):
 
-					locs = [0.5] * n_syns
+					# Randomly choose branch
+					rand_branch_idx  = np.random.randint(n_branches)
+					rand_branch 	 = post_branches[rand_branch_idx]
+					rand_branch_name = rand_branch.name().split('].')[-1]
+					
+					# Randomly choose location
+					rand_loc = np.random.rand()
 
-				else:
-					dist = input('Which synapse distribution for %s population? (uniform/random/one) '%self.population_name)
+					if rand_branch_name in branch_locs.keys():
+						branch_locs[rand_branch_name]['locs'].append(rand_loc)
+					else:
+						branch_locs[rand_branch_name] 				= {}
+						branch_locs[rand_branch_name]['locs'] 		= [rand_loc]
+						branch_locs[rand_branch_name]['branch_obj'] = rand_branch								
 
-			return locs
+				for key in branch_locs:
+					branch_locs[key]['locs'] = sorted(branch_locs[key]['locs'])
+			
+			elif dist == 'one':
+				single_branch_idx 	= np.random.randint(n_branches)
+				single_branch 	  	= post_branches[single_branch_idx]
+				single_branch_name 	= single_branch.name().split('].')[-1]
+				
+				branch_locs[single_branch_name] = {'branch_obj': single_branch, 'locs': [0.5]*n_syns}
 
-		def addInhSynapses(input_source, branch, output_dict, delay=delay, weight=weight, threshold=threshold, Dep=0, Fac=0):
+			return branch_locs
+
+		def addInhSynapses(input_source, locs, branch, output_dict, pre_branches, delay=delay, weight=weight, threshold=threshold, Dep=0, Fac=0):
 			'''locs and preysnaptics should be arrays ordered identically, for synapse location on postsynaptic branch (locs) and
 			presynaptic partner (presynaptics)
 			Inputs:
@@ -150,8 +170,8 @@ class Population():
 				- weight: weight of the synapse (in units of nS).
 			'''
 
-			locs = output_dict['locs']
-			presyn_seg = [output_dict['stim_axon_segs'][np.random.randint(len(output_dict['stim_axon_segs']))] for i in range(len(locs))]
+			presyn_seg = [pre_branches[np.random.randint(len(pre_branches))] for i in range(len(locs))]
+			
 			synapses, netcons, conductances, currents = [], [], [], []
 
 			for i in range(len(locs)):
@@ -178,35 +198,47 @@ class Population():
 					netcons.append(h.NetCon(None, synapses[-1]))
 
 				netcons[-1].weight[0] = weight # In units nS								
-
-			output_dict['synapses'] = synapses
-			output_dict['netcons']  = netcons
-			output_dict['g_GABA']    = conductances
-			output_dict['i_GABA']    = currents
+			
+			output_dict['synapses'].append(synapses)
+			output_dict['netcons'].append(netcons)
+			output_dict['g_GABA'].append(conductances)
+			output_dict['i_GABA'].append(currents)
 
 			return output_dict
 
-		post_names = [i.name().split('.')[1] for i in post_branches]
+		# post_names = [i.name().split('.')[1] for i in post_branches]
 		
 		# Connect to axon side 1
-		pre_branches = [axon(1) for axon in self.cells[pre_cell_name]['terminals']]
-		self.outputs[pre_cell_name] = {post_branch: {'locs': [], 
-										'stim_axon_segs': [], 
+		pre_branches = [axon(1) for axon in pre_pop.cells[pre_cell_name]['terminals']]
+
+		if post_cell_name not in list(self.cell_inputs.keys()):
+			self.cell_inputs[post_cell_name] = {}
+
+		self.cell_inputs[post_cell_name][pre_cell_name] = {'locs': [], 
 										'synapses': [], 
 										'netcons': [],
 										'g_GABA': [],
-										'i_GABA': []}  for post_branch in post_names}
+										'i_GABA': []}
 
-		for post_branch in self.outputs[pre_cell_name]:
-			post_branch_obj = [i for i in post_branches if post_branch in i.name()][0]
-			self.outputs[pre_cell_name][post_branch]['locs'] = synLocations(post_branch_obj.L, n_syns, dist)
-			self.outputs[pre_cell_name][post_branch]['stim_axon_segs']    = pre_branches
-			# Think about weight, delay (synaptic), threshold and noise (stochastic firing)
-			self.outputs[pre_cell_name][post_branch] = addInhSynapses(input_source, post_branch_obj, 
-																		self.outputs[pre_cell_name][post_branch],
-																		Dep=0)
+		locs_dict = synLocations(post_branches, n_syns, dist)
 
-	def addInput(self, cell_name, thalamic_activations_filename = '', connecting_gids=[], weight=0.4, axon_gids=None):
+		assert np.sum([len(locs_dict[b]['locs']) for b in locs_dict])==n_syns, 'length of locs is not n_syns'
+
+		for post_branch in locs_dict:
+			# post_branch_obj = [i for i in post_branches if post_branch in i.name()][0]
+			post_branch_obj = locs_dict[post_branch]['branch_obj']
+			locs = locs_dict[post_branch]['locs']
+			
+			self.cell_inputs[post_cell_name][pre_cell_name] = addInhSynapses(input_source, locs, post_branch_obj, self.cell_inputs[post_cell_name][pre_cell_name], pre_branches, Dep=0)
+			self.cell_inputs[post_cell_name][pre_cell_name]['locs'] = self.cell_inputs[post_cell_name][pre_cell_name]['locs'] + [[post_branch, l] for l in locs]
+
+		flatten = lambda L: [j for i in L for j in i]
+		self.cell_inputs[post_cell_name][pre_cell_name]['synapses'] = flatten(self.cell_inputs[post_cell_name][pre_cell_name]['synapses'])
+		self.cell_inputs[post_cell_name][pre_cell_name]['netcons'] = flatten(self.cell_inputs[post_cell_name][pre_cell_name]['netcons'])
+		self.cell_inputs[post_cell_name][pre_cell_name]['g_GABA'] = flatten(self.cell_inputs[post_cell_name][pre_cell_name]['g_GABA'])
+		self.cell_inputs[post_cell_name][pre_cell_name]['i_GABA'] = flatten(self.cell_inputs[post_cell_name][pre_cell_name]['i_GABA'])
+
+	def addInput(self, cell_name, thalamic_activations_filename = '', connecting_gids=[], weight=0.4, axon_gids=None, where_synapses=[]):
 
 		def checkValidFilename(filename, cond='', which_standard=None):	
 			ok = 0	
@@ -305,7 +337,13 @@ class Population():
 		
 		# Add thalamic activation as synapses to cell
 		cell_obj 	 = self.cells[cell_name]['cell']
-		branches 	 = self.cells[cell_name]['basal_dendrites']
+
+		branches = []
+		for w in where_synapses:
+			if w=='soma':
+				branches = branches.append(self.cells[cell_name][w])
+			else:
+				branches = branches + self.cells[cell_name][w] # example: where_synapses = basal_dendrites/apical_dendrites/soma
 		# branches 	 = self.cells[cell_name]['basal_dendrites'] + self.cells[cell_name]['apical_dendrites']
 		# branches = [self.cells[cell_name]['cell'].soma[0]]
 
@@ -342,7 +380,7 @@ class Population():
 		for i in range(soma.n3d()):
 			h.pt3dchange(i, soma.x3d(i)+dx, soma.y3d(i)+dy, soma.z3d(i)+dz, soma.diam, sec=soma)
 
-	def dumpSomaVs(self, t, thalamic_activations_filename):
+	def dumpSomaVs(self, t, path, thalamic_activations_filename, dump_type='', inh_inputs=None):
 		'''
 		Inputs:
 			- t: hoc vector of recorded time (h._ref_t)
@@ -361,34 +399,100 @@ class Population():
 					}
 		'''
 
-		soma_vs = {}
+		def chooseFilename():
 
-		soma_vs['spike_times_func_as_string'] = 'lambda soma_v, threshold: [t[i] for i in range(1, len(soma_v)-1)' + \
-																			' if soma_v[i] > threshold' + \
-																			' and soma_v[i-1] < soma_v[i]' + \
-																			' and soma_v[i+1] < soma_v[i]]'
+			cell_name = self.population_name
+			input_name = thalamic_activations_filename.split('/')[-1]
+			
+			# choose name by running number
+			filename = '0_sim_' + cell_name + '_tstop_' + str(int(h.tstop)) + '_' + input_name   
+			if filename[-2:] != '.p':
+				filename = filename + '.p'
+			
+			n_iters = 0
+			OK = 0
+			while not OK:
+				if filename in os.listdir(path):
+					n_iters += 1
+					filename = str(n_iters) + filename[1:]
+				else:
+					OK = 1
+
+			return filename
+
+		if dump_type == 'as_dict':
+			soma_vs = {}
+
+			# Save soma voltages
+			soma_vs['cells'] = {i: {'soma_v': self.cells[i]['soma_v'],
+									'gid': self.name_to_gid[i]} 
+					  			 for i in self.cells}
+			soma_vs['t'] = t
+
+			# Save total conductances
+			soma_vs['cells'] = {i: {'soma_v': self.cells[i]['soma_v'],
+									'gid': self.name_to_gid[i],
+									'inputs': 
+										{'stim_times': [self.inputs[i][axon]['stim_times'] for axon in self.inputs[i]],
+										 'g_AMPA': np.sum([np.sum(self.inputs[i][axon]['g_AMPA'], axis=0) for axon in self.inputs[i]], axis=0),
+										 'g_NMDA': np.sum([np.sum(self.inputs[i][axon]['g_NMDA'], axis=0) for axon in self.inputs[i]], axis=0),
+										 'i_AMPA': np.sum([np.sum(self.inputs[i][axon]['i_AMPA'], axis=0) for axon in self.inputs[i]], axis=0),
+										 'i_NMDA': np.sum([np.sum(self.inputs[i][axon]['i_NMDA'], axis=0) for axon in self.inputs[i]], axis=0)}} 
+					  			for i in self.cells}
+			
+			flatten = lambda L: [j for i in L for j in i]
+			
+			if inh_inputs:
+				for i in self.cells:
+					g_GABA = np.sum(flatten([inh_inputs[i][inh_cell]['g_GABA'] for inh_cell in inh_inputs[i]]), axis=0)
+					i_GABA = np.sum(flatten([inh_inputs[i][inh_cell]['i_GABA'] for inh_cell in inh_inputs[i]]), axis=0)
+
+					soma_vs['cells'][i]['inputs']['g_GABA'] = g_GABA
+					soma_vs['cells'][i]['inputs']['i_GABA'] = i_GABA
+			
+			filename = chooseFilename()
+			cPickle.dump(soma_vs, open(path + '/' + filename, 'wb'))
 		
-		soma_vs['cells'] = {i: {'soma_v': self.cells[i]['soma_v'],
-								'gid': self.name_to_gid[i]} 
-				  			 for i in self.cells}
+		elif dump_type == 'as_obj':
+			print('NOTICE: To save as Population object, deleting all HOC objects from {} population!'.format(self.population_name))
+			sure_ = input('Are you sure [y/n]? ')
+			if sure_=='y':
+				# Delete all hoc objexts (except for Vectors), in order to pickle
+				del self.template
+				for cell in self.cells: 
+					del self.cells[cell]['cell']
+					del self.cells[cell]['basal_dendrites'] 
+					del self.cells[cell]['apical_dendrites'] 
+					del self.cells[cell]['soma'] 
+					del self.cells[cell]['terminals'] 
+					del self.cells[cell]['axons'] 
 
-		soma_vs['t'] = t
+				for cell in self.inputs:
+					for axon in self.inputs[cell]:
+						del self.inputs[cell][axon]['synapses']
+						del self.inputs[cell][axon]['netcons']
 
-		filename = 'thalamocortical_Oren/SSA_spike_times/PV_spike_times/PV_spike_times_tstop_' + str(int(h.tstop)) + '_' + thalamic_activations_filename.split('/')[-1]   
-		if filename[-2:] != '.p':
-			filename = filename + '.p'
-		cPickle.dump(soma_vs, open(filename, 'wb'))
+						for dend in self.inputs[cell][axon]['locations']:
+							del self.inputs[cell][axon]['locations'][dend]['branch_obj']
+
+				filename = chooseFilename()
+				cPickle.dump(self, open(path + '/' + filename, 'wb'))
 		print('Dictionary with {} soma voltages saved to {}'.format(self.population_name, filename))
 
 
-		# soma_vs['cells'] = {i: {'soma_v': self.cells[i]['soma_v'],
-		# 						'gid': self.name_to_gid[i],
-		# 						'inputs': [[self.inputs[i][axon]['stim_times'] for axon in self.inputs[i]],
-		# 									[self.inputs[i][axon]['g_AMPA'] for axon in self.inputs[i]],
-		# 									[self.inputs[i][axon]['g_NMDA'] for axon in self.inputs[i]],
-		# 									[self.inputs[i][axon]['i_AMPA'] for axon in self.inputs[i]],
-		# 									[self.inputs[i][axon]['i_NMDA'] for axon in self.inputs[i]]]} 
-		# 		  			 for i in self.cells}
+		# soma_vs['spike_times_func_as_string'] = 'lambda soma_v, threshold: [t[i] for i in range(1, len(soma_v)-1)' + \
+		# 																	' if soma_v[i] > threshold' + \
+		# 																	' and soma_v[i-1] < soma_v[i]' + \
+		# 																	' and soma_v[i+1] < soma_v[i]]'
+
+
+
+
+
+
+
+
+
 
 
 

@@ -1,12 +1,5 @@
 import pandas as pd
 
-# global pyr_template_path, pyr_template_name, pyr_morph_path
-# global PV_template_path, PV_template_name, PV_morph_path
-# global PV_input_weight, PV_to_Pyr_weight, Pyr_input_weight
-# global pyr_type, not_PVs, SOM_types, stimuli, connecting_gids
-# global PV_input_delay, Pyr_input_delay, PV_output_delay, freq1, freq2, simulation_time, spike_threshold
-# global filenames, cell_type_gids, thal_connections, thalamic_locations
-
 pyr_template_path 	= 'EPFL_models/L4_PC_cADpyr230_1'
 pyr_template_name 	= 'cADpyr230_L4_PC_f15e35e578'
 pyr_morph_path 		= '{}/morphology'.format(pyr_template_path)
@@ -35,8 +28,9 @@ SOM_types = ['MC']
 
 PV_input_delay 	= 0 # TEMPORARY: CHANGE THIS
 Pyr_input_delay = PV_input_delay + 7 # 7 taken from Tohar paper (Fig 4- Supp. 2a)
-PV_output_delay = Pyr_input_delay+5 # TEMPORARY: CHECK THIS
 SOM_input_delay = PV_input_delay + 7 # 7 taken from Tohar paper (Fig 4- Supp. 2a)
+
+PV_output_delay = Pyr_input_delay + 5 # TEMPORARY: CHECK THIS
 SOM_output_delay = 0
 
 freq1 = 6666
@@ -60,6 +54,7 @@ filenames = {'cell_details': 'thalamocortical_Oren/thalamic_data/cells_details.p
 
 PV_to_Pyr_source = 'voltage'
 assert PV_to_Pyr_source in ['spike_times', 'voltage'], 'Invalid PV output type (choose spike_times or voltage)'
+assert PV_to_Pyr_source != 'spike_times', 'Still under construction!'
 
 thal_connections   = pd.read_pickle(filenames['thalamic_connections'])
 thalamic_locations = pd.read_pickle(filenames['thalamic_locs'])

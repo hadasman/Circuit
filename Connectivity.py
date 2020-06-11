@@ -123,11 +123,11 @@ class Connectivity():
 
 		return chosen_gids, chosen_n_contacts
 
-	def find_PresynGIDs(self, chosen_pyr):
+	def find_PresynGIDs(self, post_cell):
 
 		connecting_gids = []
 		for con in self.thal_connections.iterrows():
-			if con[1].post_gid == chosen_pyr:
+			if con[1].post_gid == post_cell:
 				connecting_gids.append([con[1].pre_gid, con[1].contacts]) # [presynaptic gid, no. of contacts]
 
 		return connecting_gids
@@ -139,3 +139,6 @@ class Connectivity():
 			# 		connecting_gids.append([con[1].pre_gid, con[1].contacts]) # [presynaptic gid, no. of contacts]
 
 			# Get tha thalamic activation timings and no. of contacts on the pyramidal cell
+
+	def find_numConnections():
+		pass

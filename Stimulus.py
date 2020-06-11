@@ -8,19 +8,7 @@ import _pickle as cPickle
 from tkinter import messagebox
 
 class Stimulus():
-	def __init__(self, standard_frequency, deviant_frequency, stim_times_filename, thalamic_activations_filename, axon_gids=None):
-
-		def get_activations(filename, axon_gids):
-			temp_activations = cPickle.load(open(filename, 'rb'))			
-			
-			if axon_gids:
-				activations = {}
-				for a in axon_gids:
-					activations[a] = temp_activations[a]
-			else:
-				activations = temp_activations
-
-			return activations
+	def __init__(self, standard_frequency, deviant_frequency, stim_times_filename, thalamic_activations_filename):
 
 		self.standard_frequency = standard_frequency
 		self.deviant_frequency  = deviant_frequency
@@ -28,13 +16,25 @@ class Stimulus():
 		self.stim_times_all 	 = pd.read_pickle(stim_times_filename)[standard_frequency]
 		self.stim_times_standard = [i[0] for i in self.stim_times_all if i[1]==self.standard_frequency]
 		self.stim_times_deviant  = [i[0] for i in self.stim_times_all if i[1]==self.deviant_frequency]
-		
-		self.thalamic_activations = get_activations(thalamic_activations_filename, axon_gids=axon_gids)
+		self.thalamic_activations_filename = thalamic_activations_filename
 
-	def axonResponses(self, thalamic_locations, window=100, color='black', h_ax=None, plot_results=True):
+	def get_activations(filename, axon_gids):
+		temp_activations = cPickle.load(open(filename, 'rb'))			
+		
+		if axon_gids:
+			activations = {}
+			for a in axon_gids:
+				activations[a] = temp_activations[a]
+		else:
+			activations = temp_activations
+
+		self.thalamic_activations = activations
+		
+	def axonResponses(self, thalamic_locations, window=100, color='black', h_ax=None, plot_results=True, axon_gids=None):
 		if not h_ax:
 			_, h_ax = plt.subplots()
 
+		self.get_activations(self.thalamic_activations_filename, axon_gids)
 		# Take only times that were at most <window>ms after stimulus
 		in_window = lambda time, inter: time > inter[0] and time <= inter[1] 
 		intervals = [[i, i+window] for i in self.stim_times_standard]

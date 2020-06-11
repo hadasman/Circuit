@@ -2,12 +2,13 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 import numpy as np
 import pdb
+import math
 
-def plotThalamicResponses(stimuli, freq1, freq2, thalamic_locations, run_function=False):
+def plotThalamicResponses(stimuli, freq1, freq2, thalamic_locations, run_function=False, axon_gids=None):
 	if run_function:
 
-		stim_ax = stimuli[freq1].axonResponses(thalamic_locations, color='red')
-		stim_ax = stimuli[freq2].axonResponses(thalamic_locations, color='blue', h_ax=stim_ax)
+		stim_ax = stimuli[freq1].axonResponses(thalamic_locations, color='red', axon_gids=axon_gids)
+		stim_ax = stimuli[freq2].axonResponses(thalamic_locations, color='blue', h_ax=stim_ax, axon_gids=axon_gids)
 
 		stimuli[freq1].tonotopic_location(thalamic_locations, color='red', h_ax=stim_ax)
 		stimuli[freq2].tonotopic_location(thalamic_locations, color='blue', h_ax=stim_ax)
@@ -17,7 +18,7 @@ def plotThalamicResponses(stimuli, freq1, freq2, thalamic_locations, run_functio
 
 		return stim_ax
 
-def Wehr_Zador(population, cell_name, stimuli, title_, exc_weight=0, inh_weight=0, standard_freq=None, input_pop_outputs=None, take_before=20, take_after=155, tstop=None, spike_threshold=None, dt=None, t=None):
+def Wehr_Zador(population, cell_name, stimuli, title_, exc_weight=0, inh_weight=0, standard_freq=None, input_pop_outputs=None, take_before=20, take_after=155, tstop=None, spike_threshold=None, dt=0.025, t=None):
 
 	def plot_traces(h_ax, all_means, which_traces='Currents', units_='nA'):
 
@@ -44,6 +45,9 @@ def Wehr_Zador(population, cell_name, stimuli, title_, exc_weight=0, inh_weight=
 		h_ax.set_title('Mean Synaptic %s'%which_traces)
 		h_ax.set_ylabel('%s (%s)'%(which_plot.upper(), units_))
 		h_ax.set_xlim([0, take_before+take_after])
+
+	if not population:
+		return
 
 	fig, axes = plt.subplots(3, 1)
 	fig.subplots_adjust(hspace=0.34, bottom=0.08, top=0.9) 
@@ -77,10 +81,9 @@ def Wehr_Zador(population, cell_name, stimuli, title_, exc_weight=0, inh_weight=
 		# ========== Inhibition to cell ==========
 		if input_pop_outputs:
 			for pre_PV in input_pop_outputs:
-				for sec in input_pop_outputs[pre_PV]:
-					for i in ['i_GABA', 'g_GABA']:
-						temp_vec = [cut_vec(vec, idx1, idx2) for vec in input_pop_outputs[pre_PV][sec][i]]
-						all_sums[i].append(np.sum(temp_vec, axis=0))
+				for i in ['i_GABA', 'g_GABA']:
+					temp_vec = [cut_vec(vec, idx1, idx2) for vec in input_pop_outputs[pre_PV][i]]
+					all_sums[i].append(np.sum(temp_vec, axis=0))
 
 		# Append the TOTAL currents and conductances, over all synapses in given cell, for the current time point
 		for i in all_sums:
@@ -113,8 +116,10 @@ def Wehr_Zador(population, cell_name, stimuli, title_, exc_weight=0, inh_weight=
 
 	return axes
 
-def PlotSomas(populations, t, stimulus, tstop=None, spike_threshold=None, dt=None):
+def PlotSomas(populations, t, stimulus, tstop=None, spike_threshold=None, dt=0.025):
 	
+	if len(populations) != 3:
+		return
 	_, h_ax = plt.subplots()
 
 	all_cells, cell_names = [], []
@@ -238,7 +243,7 @@ def plotFRs(stim_times, soma_v, t, tstop=0, window=0, take_before=150, take_afte
 	FRs, PSTH, bins = get_FR_and_PSTH(stim_times, spike_times)
 	
 	if not axes_h:
-		_, [[PSTH_ax, PSTH_ax_norm], [FR_ax, FR_ax_norm]] = plt.subplots(2, 2)
+		_, [[PSTH_ax, PSTH_ax_norm], [FR_ax, FR_ax_norm]] = plt.subplots(2, 2, figsize=(9, 7.5))
 	else:
 		PSTH_ax 		= axes_h[0][0]
 		PSTH_ax_norm 	= axes_h[0][1]
@@ -255,14 +260,166 @@ def plotFRs(stim_times, soma_v, t, tstop=0, window=0, take_before=150, take_afte
 	plt.gcf().subplots_adjust(hspace=0.34, bottom=0.08, top=0.9) 
 
 	plt.suptitle('Simulation details: {}ms bins, simulation length: {}s'.format(window, int(tstop/1000)))
-	
+
 	return [[PSTH_ax, PSTH_ax_norm], [FR_ax, FR_ax_norm]]
 
 
 
 
+def Wehr_Zador_fromData(data, cell_name, stim_times, exc_weight=0, inh_weight=0, standard_freq=6666, take_before=20, take_after=155, tstop=None, spike_threshold=0, dt=0.025, t=None):
+
+	def getData(data, cell_name):
+		g_AMPA = data['cells'][cell_name]['inputs']['g_AMPA']
+		g_NMDA = data['cells'][cell_name]['inputs']['g_NMDA']		
+		i_AMPA = data['cells'][cell_name]['inputs']['i_AMPA']
+		i_NMDA = data['cells'][cell_name]['inputs']['i_NMDA']
+		
+
+		soma_v = data['cells'][cell_name]['soma_v']
+		gid    = data['cells'][cell_name]['gid']
+
+		if 'g_GABA' in data['cells'][cell_name]['inputs']:
+			g_GABA = data['cells'][cell_name]['inputs']['g_GABA']
+			i_GABA = data['cells'][cell_name]['inputs']['i_GABA']
+		else:
+			g_GABA, i_GABA = [], []
+		
+		return g_AMPA, g_NMDA, i_AMPA, i_NMDA, soma_v, gid, g_GABA, i_GABA
+
+	def plot_traces(t_vec, n_points, h_ax, all_means, which_traces='Currents', units_='nA'):
+
+		if which_traces == 'Currents':
+			which_plot = 'i'
+			unit_conversion = 1
+		elif which_traces == 'Conductances':
+			which_plot = 'g'
+			unit_conversion = 1000
+
+		AMPA = [i*unit_conversion for i in all_means['%s_AMPA'%which_plot]]
+		NMDA = [i*unit_conversion for i in all_means['%s_NMDA'%which_plot]]			
+
+		h_ax.axvline(take_before, LineStyle='--', color='gray')
+		h_ax.plot(t_vec, [AMPA[i]+NMDA[i] for i in range(n_points)], 'purple', label='%s$_{AMPA}$ + %s$_{NMDA}$'%(which_plot, which_plot))
+
+		if 'g_GABA' in all_means:
+			GABA = [i*unit_conversion for i in all_means['%s_GABA'%which_plot]]
+			
+			h_ax.plot(t_vec, GABA, 'b', label='%s$_{GABA}$'%which_plot)
+			h_ax.plot(t_vec, [GABA[i]+AMPA[i]+NMDA[i] for i in range(n_points)], label='%s$_{tot}$'%which_plot)
+
+		h_ax.legend()
+		h_ax.set_title('Mean Synaptic %s'%which_traces)
+		h_ax.set_ylabel('%s (%s)'%(which_plot.upper(), units_))
+		h_ax.set_xlim([0, take_before+take_after])
+
+	fig, axes = plt.subplots(3, 1, figsize=(9, 7.5))
+	fig.subplots_adjust(hspace=0.34, bottom=0.08, top=0.9) 
+
+	g_AMPA, g_NMDA, i_AMPA, i_NMDA, soma_v, gid, g_GABA, i_GABA = getData(data, cell_name)	
+	
+	times = [i[0] for i in stim_times if i[0]<tstop]
+
+	cut_vec = lambda vec, start_idx, end_idx: [vec[i] for i in range(start_idx, end_idx)]
+	
+	spike_count = 0
+	all_means = {'i_AMPA': [], 'g_AMPA': [], 'i_NMDA': [], 'g_NMDA': []}
+
+	print('Analyzing conductances and currents')
+	for T in tqdm(times):
+		idx1 = (np.abs([i-(T-take_before) for i in t])).argmin()
+		idx2 = (np.abs([i-(T+take_after) for i in t])).argmin()
+		
+		t_vec = cut_vec(t, idx1, idx2)
+		t_vec = [i-t_vec[0] for i in t_vec]
+		v_vec = cut_vec(soma_v, idx1, idx2)
+		if any([i>=spike_threshold for i in v_vec]):
+			spike_count += 1
 
 
+		all_means['g_AMPA'].append(cut_vec(g_AMPA, idx1, idx2))
+		all_means['g_NMDA'].append(cut_vec(g_NMDA, idx1, idx2))
+		all_means['i_AMPA'].append(cut_vec(i_AMPA, idx1, idx2))
+		all_means['i_NMDA'].append(cut_vec(i_NMDA, idx1, idx2))
+
+
+		if 'g_GABA' in all_means:
+			all_means['g_GABA'].append(cut_vec(g_GABA, idx1, idx2))
+			all_means['i_GABA'].append(cut_vec(i_GABA, idx1, idx2))
+
+		axes[0].plot(t_vec, v_vec, 'k', LineWidth=0.7)
+		if T==times[0]:
+			axes[0].legend(['%s soma v'%cell_name], loc='upper right')
+
+	# Average over time points
+	for i in all_means:
+		all_means[i] = np.mean(all_means[i][:-1], axis=0)
+
+	t_vec_tot = [i*dt for i in range(0, len(all_means['i_AMPA']))]
+	n_points = len(t_vec_tot)
+
+	title_ = cell_name.split([i for i in cell_name if i.isdigit()][0])[0]
+	plt.suptitle('{} (GID: {}) Cell ({} spikes out of {})'.format(title_, gid, spike_count, len(times)))
+	axes[0].axvline(take_before, LineStyle='--', color='gray')
+	axes[0].set_title('Overlay of Somatic Responses to %sHz Simulus (locked to stimulus prestntation)'%standard_freq)
+	axes[0].set_ylabel('V (mV)')
+	axes[0].set_xlim([0, take_before+take_after])
+	
+	# ========== Plot Currents ==========
+	plot_traces(t_vec_tot, n_points, axes[1], all_means, which_traces='Currents', units_='nA')
+
+	# ========== Plot Conductances ==========
+	plot_traces(t_vec_tot, n_points, axes[2], all_means, which_traces='Conductances', units_='nS')
+	axes[2].set_xlabel('T (ms)')
+
+	return axes
+
+def PlotSomas_fromData(DATAs, t, stim_times_standard=None, standard_freq=None, stim_times_deviant=None, deviant_freq=None, tstop=None, spike_threshold=None, dt=0.025):
+	
+	fig, h_ax = plt.subplots(figsize=(9, 7.5))
+	fig.subplots_adjust(hspace=0.48, bottom=0.08, top=0.91, left=0.1, right=0.95) 
+
+	title_string = ''
+
+	for cell_name in DATAs:
+		
+		data = DATAs[cell_name]
+		name_ = ''.join([i for i in cell_name if not i.isdigit()])
+
+		if title_string.count('(')==2:
+			title_string = title_string + 'and {} ({})'.format(name_, DATAs[cell_name]['cells'][cell_name]['gid'])
+		else:
+			title_string = title_string + '{} ({}), '.format(name_, DATAs[cell_name]['cells'][cell_name]['gid'])
+
+		temp_soma_v = data['cells'][cell_name]['soma_v']
+		if len(temp_soma_v) > len(t):
+			temp_soma_v = [i for i in temp_soma_v][:len(t)]
+		h_ax.plot(t, temp_soma_v, label = '{} ({})'.format(name_, data['cells'][cell_name]['gid']))
+
+	if stim_times_standard and stim_times_deviant:
+		assert tstop is not None, 'No tstop argument!'
+		for T in stim_times_standard:
+			if T < tstop:
+				if T == stim_times_standard[0]:
+					h_ax.axvline(T, LineStyle='--', color='gray', alpha=0.5, label='{} Stimulus'.format(standard_freq)) 
+				else:
+					h_ax.axvline(T, LineStyle='--', color='gray', alpha=0.5)
+		for T in stim_times_deviant:
+			if T < tstop:
+				if T == stim_times_deviant[0]:
+					h_ax.axvline(T, LineStyle='--', color='green', alpha=0.5, label='{} Stimulus'.format(deviant_freq)) 
+				else:
+					h_ax.axvline(T, LineStyle='--', color='green', alpha=0.5)
+	h_ax.legend()
+
+	h_ax.set_title('Example of {} Responses to 2 tones ({}Hz, {}Hz)\n(at tonotopical position between tones, standard: {})'\
+					.format(title_string, min(standard_freq, deviant_freq), \
+										  max(standard_freq, deviant_freq), \
+										  standard_freq)) 
+	h_ax.set_xlabel('T (ms)')
+	h_ax.set_ylabel('V (mV)')
+	h_ax.set_xlim([0, tstop])
+
+	return h_ax
 
 
 
