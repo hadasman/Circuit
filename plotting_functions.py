@@ -61,9 +61,11 @@ def Wehr_Zador(population, cell_name, stimuli, title_, exc_weight=0, inh_weight=
 
 	print('Analyzing conductances and currents')
 	for T in tqdm(times):
-		idx1 = (np.abs([i-(T-take_before) for i in t])).argmin()
-		idx2 = (np.abs([i-(T+take_after) for i in t])).argmin()
-		
+		# idx1 = (np.abs([i-(T-take_before) for i in t])).argmin()
+		# idx2 = (np.abs([i-(T+take_after) for i in t])).argmin()
+		idx1 = int((T-take_before)/dt)
+		idx2 = int((T+take_after)/dt)
+
 		t_vec = cut_vec(t, idx1, idx2)
 		t_vec = [i-t_vec[0] for i in t_vec]
 		v_vec = cut_vec(population.cells[cell_name]['soma_v'], idx1, idx2)
@@ -120,10 +122,11 @@ def PlotSomas(populations, t, stimulus, tstop=None, spike_threshold=None, dt=0.0
 	
 	if len(populations) != 3:
 		return
-	_, h_ax = plt.subplots()
+	_, h_ax = plt.subplots(4, 1)
 
 	all_cells, cell_names = [], []
 	for cell_name in populations:
+		pop_idx = list(populations.keys()).index(cell_name) + 1
 		pop = populations[cell_name]
 		all_cells.append(''.join([i for i in cell_name if not i.isdigit()]))
 		cell_names.append(cell_name)
@@ -131,18 +134,30 @@ def PlotSomas(populations, t, stimulus, tstop=None, spike_threshold=None, dt=0.0
 		temp_soma_v = pop.cells[cell_name]['soma_v']
 		if len(temp_soma_v) > len(t):
 			temp_soma_v = [i for i in temp_soma_v][:len(t)]
-		h_ax.plot(t, temp_soma_v, label = '{} ({})'.format(all_cells[-1], pop.name_to_gid[cell_name]))
+		h_ax[0].plot(t, temp_soma_v, label = '{} ({})'.format(all_cells[-1], pop.name_to_gid[cell_name]))
+
+		h_ax[pop_idx].plot(t, temp_soma_v)
+		h_ax[pop_idx].set_title('{} ({})'.format(all_cells[-1], pop.name_to_gid[cell_name]))
 
 	for stim in [['Standard', stimulus.stim_times_standard], ['Deviant', stimulus.stim_times_deviant]]:
 		times = stim[1]
 		for s in times:
 			if s < tstop:
 				if s == times[0]:
-					h_ax.axvline(s, LineStyle='--', color='k', alpha=0.5, label='{} Stimulus'.format(stim[0])) 
+					h_ax[0].axvline(s, LineStyle='--', color='k', alpha=0.5, label='{} Stimulus'.format(stim[0])) 
+					h_ax[1].axvline(s, LineStyle='--', color='k', alpha=0.5, label='{} Stimulus'.format(stim[0]))
+					h_ax[2].axvline(s, LineStyle='--', color='k', alpha=0.5, label='{} Stimulus'.format(stim[0]))
+					h_ax[3].axvline(s, LineStyle='--', color='k', alpha=0.5, label='{} Stimulus'.format(stim[0]))
 				else:
-					h_ax.axvline(s, LineStyle='--', color='k', alpha=0.5)
+					h_ax[0].axvline(s, LineStyle='--', color='k', alpha=0.5)
+					h_ax[1].axvline(s, LineStyle='--', color='k', alpha=0.5)
+					h_ax[2].axvline(s, LineStyle='--', color='k', alpha=0.5)
+					h_ax[3].axvline(s, LineStyle='--', color='k', alpha=0.5)
 
-	h_ax.legend()
+	h_ax[0].legend()
+	h_ax[1].legend()
+	h_ax[2].legend()
+	h_ax[3].legend()
 
 	title_string = ''
 	for i in range(len(populations)):
@@ -152,13 +167,20 @@ def PlotSomas(populations, t, stimulus, tstop=None, spike_threshold=None, dt=0.0
 		else:
 			title_string = title_string + '{} ({}), '.format(all_cells[i], populations[name_].name_to_gid[name_])
 
-	h_ax.set_title('Example of {} Responses to 2 tones ({}Hz, {}Hz)\n(at tonotopical position between tones, standard: {})'\
+	h_ax[0].set_title('Example of {} Responses to 2 tones ({}Hz, {}Hz)\n(at tonotopical position between tones, standard: {})'\
 					.format(title_string, min(stimulus.standard_frequency, \
 							stimulus.deviant_frequency), max(stimulus.standard_frequency, \
 							stimulus.deviant_frequency), stimulus.standard_frequency)) 
-	h_ax.set_xlabel('T (ms)')
-	h_ax.set_ylabel('V (mV)')
-	h_ax.set_xlim([0, tstop])
+	
+	h_ax[0].set_ylabel('V (mV)')
+	h_ax[1].set_ylabel('V (mV)')
+	h_ax[2].set_ylabel('V (mV)')
+	h_ax[3].set_ylabel('V (mV)')
+	h_ax[3].set_xlabel('T (ms)')
+	h_ax[0].set_xlim([0, tstop])
+	h_ax[1].set_xlim([0, tstop])
+	h_ax[2].set_xlim([0, tstop])
+	h_ax[3].set_xlim([0, tstop])
 
 	return h_ax
 
@@ -243,7 +265,7 @@ def plotFRs(stim_times, soma_v, t, tstop=0, window=0, take_before=150, take_afte
 	FRs, PSTH, bins = get_FR_and_PSTH(stim_times, spike_times)
 	
 	if not axes_h:
-		_, [[PSTH_ax, PSTH_ax_norm], [FR_ax, FR_ax_norm]] = plt.subplots(2, 2, figsize=(9, 7.5))
+		_, [[PSTH_ax, PSTH_ax_norm], [FR_ax, FR_ax_norm]] = plt.subplots(2, 2, figsize=(15, 7.5))
 	else:
 		PSTH_ax 		= axes_h[0][0]
 		PSTH_ax_norm 	= axes_h[0][1]
@@ -269,20 +291,32 @@ def plotFRs(stim_times, soma_v, t, tstop=0, window=0, take_before=150, take_afte
 def Wehr_Zador_fromData(data, cell_name, stim_times, exc_weight=0, inh_weight=0, standard_freq=6666, take_before=20, take_after=155, tstop=None, spike_threshold=0, dt=0.025, t=None):
 
 	def getData(data, cell_name):
-		g_AMPA = data['cells'][cell_name]['inputs']['g_AMPA']
-		g_NMDA = data['cells'][cell_name]['inputs']['g_NMDA']		
-		i_AMPA = data['cells'][cell_name]['inputs']['i_AMPA']
-		i_NMDA = data['cells'][cell_name]['inputs']['i_NMDA']
+		g_AMPA = data[cell_name]['inputs']['g_AMPA']
+		g_NMDA = data[cell_name]['inputs']['g_NMDA']		
+		i_AMPA = data[cell_name]['inputs']['i_AMPA']
+		i_NMDA = data[cell_name]['inputs']['i_NMDA']
 		
+		soma_v = data[cell_name]['soma_v']
+		gid    = data[cell_name]['gid']
 
-		soma_v = data['cells'][cell_name]['soma_v']
-		gid    = data['cells'][cell_name]['gid']
+		# g_GABA, i_GABA = [], []
+		g_GABA, i_GABA = {}, {}
+		if 'g_GABA' in data[cell_name]['inputs']:
+			for pre_cell in data[cell_name]['inputs']['g_GABA']:
+			
+				if hasattr(data[cell_name]['inputs']['g_GABA'][pre_cell], "__len__"):
 
-		if 'g_GABA' in data['cells'][cell_name]['inputs']:
-			g_GABA = data['cells'][cell_name]['inputs']['g_GABA']
-			i_GABA = data['cells'][cell_name]['inputs']['i_GABA']
-		else:
-			g_GABA, i_GABA = [], []
+					if type(data[cell_name]['inputs']['g_GABA'][pre_cell])==list: # Old inputs were saved in individual cell keys, therefore sum was needed
+						g_GABA.append(np.sum(data[cell_name]['inputs']['g_GABA'][pre_cell], axis=0))
+						i_GABA.append(np.sum(data[cell_name]['inputs']['i_GABA'][pre_cell], axis=0))
+					else: # This is appropriate for the current data types (separated by keys: pre_cell = 'PV', 'SOM')
+						g_GABA[pre_cell] = data[cell_name]['inputs']['g_GABA'][pre_cell]
+						i_GABA[pre_cell] = data[cell_name]['inputs']['i_GABA'][pre_cell]
+						# g_GABA.append(data[cell_name]['inputs']['g_GABA'][pre_cell])
+						# i_GABA.append(data[cell_name]['inputs']['i_GABA'][pre_cell])
+
+			# g_GABA = np.sum(g_GABA, axis=0)
+			# i_GABA = np.sum(i_GABA, axis=0)
 		
 		return g_AMPA, g_NMDA, i_AMPA, i_NMDA, soma_v, gid, g_GABA, i_GABA
 
@@ -300,12 +334,23 @@ def Wehr_Zador_fromData(data, cell_name, stim_times, exc_weight=0, inh_weight=0,
 
 		h_ax.axvline(take_before, LineStyle='--', color='gray')
 		h_ax.plot(t_vec, [AMPA[i]+NMDA[i] for i in range(n_points)], 'purple', label='%s$_{AMPA}$ + %s$_{NMDA}$'%(which_plot, which_plot))
-
+		h_ax.plot(t_vec, AMPA, 'purple', label='AMPA', alpha=0.5)
+		h_ax.plot(t_vec, NMDA, 'purple', label='NMDA', alpha=0.3)
 		if 'g_GABA' in all_means:
-			GABA = [i*unit_conversion for i in all_means['%s_GABA'%which_plot]]
+			GABA = {}
+
+			alpha_ = 1
+			for pre_cell in all_means['%s_GABA'%which_plot]:
+
+				GABA[pre_cell] = [i*unit_conversion for i in all_means['%s_GABA'%which_plot][pre_cell]]
+				h_ax.plot(t_vec, GABA[pre_cell], 'b', label='%s$_{GABA}$ %s'%(which_plot, pre_cell), alpha=alpha_)
+				alpha_ = 0.5
+
+			GABA_tot = np.sum([GABA[i] for i in GABA], axis=0)
+			# h_ax.plot(t_vec, GABA, 'b', label='%s$_{GABA}$'%which_plot)
+			# h_ax.plot(t_vec, [GABA[i]+AMPA[i]+NMDA[i] for i in range(n_points)], label='%s$_{tot}$'%which_plot)
+			h_ax.plot(t_vec, [GABA_tot[i]+AMPA[i]+NMDA[i] for i in range(n_points)], label='%s$_{tot}$'%which_plot)
 			
-			h_ax.plot(t_vec, GABA, 'b', label='%s$_{GABA}$'%which_plot)
-			h_ax.plot(t_vec, [GABA[i]+AMPA[i]+NMDA[i] for i in range(n_points)], label='%s$_{tot}$'%which_plot)
 
 		h_ax.legend()
 		h_ax.set_title('Mean Synaptic %s'%which_traces)
@@ -316,43 +361,58 @@ def Wehr_Zador_fromData(data, cell_name, stim_times, exc_weight=0, inh_weight=0,
 	fig.subplots_adjust(hspace=0.34, bottom=0.08, top=0.9) 
 
 	g_AMPA, g_NMDA, i_AMPA, i_NMDA, soma_v, gid, g_GABA, i_GABA = getData(data, cell_name)	
-	
+
 	times = [i[0] for i in stim_times if i[0]<tstop]
 
 	cut_vec = lambda vec, start_idx, end_idx: [vec[i] for i in range(start_idx, end_idx)]
 	
 	spike_count = 0
 	all_means = {'i_AMPA': [], 'g_AMPA': [], 'i_NMDA': [], 'g_NMDA': []}
+	if hasattr(g_GABA, "__len__"):
+		if len(g_GABA) > 0:
+			all_means['g_GABA'] = {pre_cell: [] for pre_cell in g_GABA}
+			all_means['i_GABA'] = {pre_cell: [] for pre_cell in i_GABA}
 
 	print('Analyzing conductances and currents')
+
+	if take_after+times[-1]>t[-1]: times = times[:-1] # If take_after goes beyond recording, discard last stimulus
+
 	for T in tqdm(times):
-		idx1 = (np.abs([i-(T-take_before) for i in t])).argmin()
-		idx2 = (np.abs([i-(T+take_after) for i in t])).argmin()
+		# idx1 = (np.abs([i-(T-take_before) for i in t])).argmin()
+		# idx2 = (np.abs([i-(T+take_after) for i in t])).argmin()
 		
+		idx1 = int((T-take_before)/dt)
+		idx2 = int((T+take_after)/dt)
+
 		t_vec = cut_vec(t, idx1, idx2)
+
 		t_vec = [i-t_vec[0] for i in t_vec]
 		v_vec = cut_vec(soma_v, idx1, idx2)
 		if any([i>=spike_threshold for i in v_vec]):
 			spike_count += 1
-
 
 		all_means['g_AMPA'].append(cut_vec(g_AMPA, idx1, idx2))
 		all_means['g_NMDA'].append(cut_vec(g_NMDA, idx1, idx2))
 		all_means['i_AMPA'].append(cut_vec(i_AMPA, idx1, idx2))
 		all_means['i_NMDA'].append(cut_vec(i_NMDA, idx1, idx2))
 
-
 		if 'g_GABA' in all_means:
-			all_means['g_GABA'].append(cut_vec(g_GABA, idx1, idx2))
-			all_means['i_GABA'].append(cut_vec(i_GABA, idx1, idx2))
+			for pre_cell in g_GABA:				
+				all_means['g_GABA'][pre_cell].append(cut_vec(g_GABA[pre_cell], idx1, idx2))
+				all_means['i_GABA'][pre_cell].append(cut_vec(i_GABA[pre_cell], idx1, idx2))
+
 
 		axes[0].plot(t_vec, v_vec, 'k', LineWidth=0.7)
 		if T==times[0]:
 			axes[0].legend(['%s soma v'%cell_name], loc='upper right')
 
 	# Average over time points
-	for i in all_means:
-		all_means[i] = np.mean(all_means[i][:-1], axis=0)
+	for i in all_means:		
+		if 'GABA' in i:
+			for j in all_means[i]:
+				all_means[i][j] = np.mean(all_means[i][j][:-1], axis=0)
+		else:
+			all_means[i] = np.mean(all_means[i][:-1], axis=0)
 
 	t_vec_tot = [i*dt for i in range(0, len(all_means['i_AMPA']))]
 	n_points = len(t_vec_tot)
@@ -375,7 +435,7 @@ def Wehr_Zador_fromData(data, cell_name, stim_times, exc_weight=0, inh_weight=0,
 
 def PlotSomas_fromData(DATAs, t, stim_times_standard=None, standard_freq=None, stim_times_deviant=None, deviant_freq=None, tstop=None, spike_threshold=None, dt=0.025):
 	
-	fig, h_ax = plt.subplots(figsize=(9, 7.5))
+	fig, h_ax = plt.subplots(figsize=(15, 7.5))
 	fig.subplots_adjust(hspace=0.48, bottom=0.08, top=0.91, left=0.1, right=0.95) 
 
 	title_string = ''
@@ -386,14 +446,14 @@ def PlotSomas_fromData(DATAs, t, stim_times_standard=None, standard_freq=None, s
 		name_ = ''.join([i for i in cell_name if not i.isdigit()])
 
 		if title_string.count('(')==2:
-			title_string = title_string + 'and {} ({})'.format(name_, DATAs[cell_name]['cells'][cell_name]['gid'])
+			title_string = title_string + 'and {} ({})'.format(name_, DATAs[cell_name][cell_name]['gid'])
 		else:
-			title_string = title_string + '{} ({}), '.format(name_, DATAs[cell_name]['cells'][cell_name]['gid'])
+			title_string = title_string + '{} ({}), '.format(name_, DATAs[cell_name][cell_name]['gid'])
 
-		temp_soma_v = data['cells'][cell_name]['soma_v']
+		temp_soma_v = data[cell_name]['soma_v']
 		if len(temp_soma_v) > len(t):
 			temp_soma_v = [i for i in temp_soma_v][:len(t)]
-		h_ax.plot(t, temp_soma_v, label = '{} ({})'.format(name_, data['cells'][cell_name]['gid']))
+		h_ax.plot(t, temp_soma_v, label = '{} ({})'.format(name_, data[cell_name]['gid']))
 
 	if stim_times_standard and stim_times_deviant:
 		assert tstop is not None, 'No tstop argument!'
@@ -411,13 +471,77 @@ def PlotSomas_fromData(DATAs, t, stim_times_standard=None, standard_freq=None, s
 					h_ax.axvline(T, LineStyle='--', color='green', alpha=0.5)
 	h_ax.legend()
 
-	h_ax.set_title('Example of {} Responses to 2 tones ({}Hz, {}Hz)\n(at tonotopical position between tones, standard: {})'\
-					.format(title_string, min(standard_freq, deviant_freq), \
-										  max(standard_freq, deviant_freq), \
-										  standard_freq)) 
+	fig.suptitle('Example of {} Responses to 2 tones ({}Hz, {}Hz)'.format(title_string, min(standard_freq, deviant_freq), max(standard_freq, deviant_freq)), size=12)
+	h_ax.set_title('(at tonotopical position between tones, standard: {})'.format(standard_freq)) 
 	h_ax.set_xlabel('T (ms)')
 	h_ax.set_ylabel('V (mV)')
 	h_ax.set_xlim([0, tstop])
+
+	return h_ax
+
+def PlotSomaSubplots_fromData(DATAs, t, stim_times_standard=None, standard_freq=None, stim_times_deviant=None, deviant_freq=None, tstop=None, spike_threshold=None, dt=0.025):
+	
+	fig, h_ax = plt.subplots(4, 1, figsize=(15, 7.5))
+	fig.subplots_adjust(hspace=0.48, bottom=0.08, top=0.91, left=0.1, right=0.95) 
+
+	title_string = ''
+
+	for cell_name in DATAs:
+		
+		pop_idx = list(DATAs.keys()).index(cell_name) + 1
+
+		data = DATAs[cell_name]
+		name_ = ''.join([i for i in cell_name if not i.isdigit()])
+
+		if title_string.count('(')==2:
+			title_string = title_string + 'and {} ({})'.format(name_, DATAs[cell_name][cell_name]['gid'])
+		else:
+			title_string = title_string + '{} ({}), '.format(name_, DATAs[cell_name][cell_name]['gid'])
+
+		temp_soma_v = data[cell_name]['soma_v']
+		if len(temp_soma_v) > len(t):
+			temp_soma_v = [i for i in temp_soma_v][:len(t)]
+		h_ax[0].plot(t, temp_soma_v, label = '{} ({})'.format(name_, data[cell_name]['gid']))
+		
+		h_ax[pop_idx].plot(t, temp_soma_v)
+		h_ax[pop_idx].set_title('{} ({})'.format(name_, data[cell_name]['gid']))
+
+
+	if stim_times_standard and stim_times_deviant:
+		assert tstop is not None, 'No tstop argument!'
+
+		for stim in[[standard_freq, stim_times_standard], [deviant_freq, stim_times_deviant]]:
+			
+			times = stim[1]
+			for T in times:
+				if T < tstop:
+					if T  == times[0]:						
+						h_ax[0].axvline(T, LineStyle='--', color='gray', alpha=0.5, label='{} Stimulus'.format(stim[0])) 
+						h_ax[1].axvline(T, LineStyle='--', color='gray', alpha=0.5, label='{} Stimulus'.format(stim[0])) 
+						h_ax[2].axvline(T, LineStyle='--', color='gray', alpha=0.5, label='{} Stimulus'.format(stim[0])) 
+						h_ax[3].axvline(T, LineStyle='--', color='gray', alpha=0.5, label='{} Stimulus'.format(stim[0])) 
+					else:
+						h_ax[0].axvline(T, LineStyle='--', color='gray', alpha=0.5)
+						h_ax[1].axvline(T, LineStyle='--', color='gray', alpha=0.5)
+						h_ax[2].axvline(T, LineStyle='--', color='gray', alpha=0.5)
+						h_ax[3].axvline(T, LineStyle='--', color='gray', alpha=0.5)
+
+	h_ax[0].legend()
+	h_ax[1].legend()
+	h_ax[2].legend()
+	h_ax[3].legend()
+
+	fig.suptitle('Example of {} Responses to 2 tones ({}Hz, {}Hz)'.format(title_string, min(standard_freq, deviant_freq), max(standard_freq, deviant_freq)), size=12)
+	h_ax[0].set_title('(at tonotopical position between tones, standard: {})'.format(standard_freq)) 
+	h_ax[0].set_ylabel('V (mV)')
+	h_ax[1].set_ylabel('V (mV)')
+	h_ax[2].set_ylabel('V (mV)')
+	h_ax[3].set_ylabel('V (mV)')
+	h_ax[3].set_xlabel('T (ms)')
+	h_ax[0].set_xlim([0, tstop])
+	h_ax[1].set_xlim([0, tstop])
+	h_ax[2].set_xlim([0, tstop])
+	h_ax[3].set_xlim([0, tstop])
 
 	return h_ax
 

@@ -173,7 +173,7 @@ proc biophys() {
 		distribute($o1.somatic,"gamma_CaDynamics_E2","(0.0 * %g + 1.0)*0.000814")
 		distribute($o1.somatic,"gNap_Et2bar_Nap_Et2","(0.0 * %g + 1.0)*0.000001")
 		distribute($o1.somatic,"gCa_LVAstbar_Ca_LVAst","(0.0 * %g + 1.0)*0.009728")
-		distribute($o1.somatic,"gSK_E2bar_SK_E2","(0.0 * %g + 1.0)*0.019726")
+		distribute($o1.somatic,"gSK_E2bar_SK_E2","(0.0 * %g + 1.0)*0.002099")
 		distribute($o1.somatic,"gK_Pstbar_K_Pst","(0.0 * %g + 1.0)*0.000114")
 		distribute($o1.somatic,"gSKv3_1bar_SKv3_1","(0.0 * %g + 1.0)*0.260872")
 		distribute($o1.somatic,"decay_CaDynamics_E2","(0.0 * %g + 1.0)*967.678789")
