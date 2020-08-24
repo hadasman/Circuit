@@ -104,16 +104,18 @@ def set_ThalamicInputs(Pyr_pop, PV_pop, SOM_pop, thalamic_GIDs):
 
 		SOM_pop.addInput('SOM0', record_syns=record_thalamic_syns, where_synapses=where_SOM_syns, weight=SOM_input_weight, thalamic_activations_filename=activated_filename, connecting_gids=thalamic_GIDs['to_SOM']) 
 
-def remove_mechs(mech_list, which_secs='all'):
+def remove_mechs(which_pop, mech_list, which_secs='all'):
 	'''
 	which_secs is either the string "all" or a list which elements may be: soma, dend, apic, axon.
 	'''
+
 	mt = h.MechanismType(0)
-	for sec in h.allsec():
-		if which_secs == 'all' or any([j in sec.name() for j in which_secs]):
-			for mech in mech_list:
-				mt.select(mech)
-				mt.remove(sec=sec)
+	for cell in which_pop.cells:
+		for sec in which_pop.cells[cell]['cell'].all:
+			if which_secs == 'all' or any([j in sec.name() for j in which_secs]):
+				for mech in mech_list:
+					mt.select(mech)
+					mt.remove(sec=sec)
 
 def putspikes():
 	
@@ -195,7 +197,8 @@ def RunSim(v_init=-75, tstop=154*1000, print_=''):
 # n_syns_SOM_to_PV = 200
 # SOM_to_PV_weight = 0.4
 SOM_to_Pyr_weight = 0.3
-PV_to_Pyr_weight = 0.3
+PV_to_Pyr_weight = 0.5
+SOM_to_PV_weight = 0.3
 
 thalamic_to_Pyr = True
 thalamic_to_PV = True
@@ -208,6 +211,8 @@ connect_SOM_to_Pyr = True
 clamp_stabilization_time = 0
 
 PV_output_delay = 0
+SOM_output_delay = 0
+
 PV_input_delay = 0 + clamp_stabilization_time
 SOM_input_delay = 0 + clamp_stabilization_time
 Pyr_input_delay = 0 + clamp_stabilization_time
@@ -268,7 +273,6 @@ if connect_SOM_to_Pyr:
 
 			Pyr_pop.connectCells(Pyr_cell, SOM_pop, SOM_cell, SOM_to_Pyr_post_secs, SOM_to_Pyr_syn_specs, record_syns=record_SOM_syns, input_source='voltage', weight=SOM_to_Pyr_weight, delay=SOM_output_delay, threshold=spike_threshold)
 
-
 # Clamp soma
 clamped_cell = list(clamped_pop.cells.keys())[0]
 
@@ -281,13 +285,18 @@ VClamp2 = h.VClamp(clamped_sec2)
 
 t = h.Vector()
 t.record(h._ref_t)
-i = h.Vector()
-i.record(VClamp._ref_i)
+i_clamp = h.Vector()
+i_clamp.record(VClamp._ref_i)
 v = h.Vector()
 v = v.record(clamped_sec2._ref_v)
 
 events = h.FInitializeHandler(putspikes)
 
+# remove_mechs(clamped_pop, ['Ca_LVAst','Ca_HVA','Ih','Im','K_Pst','K_Tst','NaTa_t','NaTs2_t','Nap_Et2','SK_E2','SKv3_1'])
+
+# exp = []
+# for i in Pyr_pop.cells['Pyr0']['basal_dendrites']: 
+# 	exp.append(h.Vector().record(i(0)._ref_v)) 
 # ============================================  Perform Experiment  ============================================
 exp_type = 'one_step'
 if exp_type == 'two_steps':
@@ -312,7 +321,7 @@ if exp_type == 'two_steps':
 	h.run()
 
 	plt.figure()
-	plt.plot(list(t)[1:], list(i)[1:])
+	plt.plot(list(t)[1:], list(i_clamp)[1:])
 	plt.title('Synaptic Currents Recorded at {} Soma While Voltage-Clamped'.format(clamped_pop.population_name))
 	plt.xlabel('T (ms')
 	plt.ylabel('I (nA)')
@@ -323,19 +332,19 @@ if exp_type == 'two_steps':
 	f.suptitle('{} V-Clamped to {} and {})'.format(clamped_pop.population_name, VClamp.amp[0], VClamp.amp[1]), size=13)
 	ax[0].set_title('Current Through Voltage Clamp')
 	ax[0].set_ylabel('I (nA)')
-	ax[0].plot(list(t)[1:], list(i)[1:])
+	ax[0].plot(list(t)[1:], list(i_clamp)[1:])
 	
-	idx_start = [j for j in range(len(i)-1) if (i[j+1]-i[j])<0.0001][0] 
+	idx_start = [j for j in range(len(i_clamp)-1) if (i_clamp[j+1]-i_clamp[j])<0.0001][0] 
 	idx_mid = int(dur1 / h.dt)
 	ax[1].set_title('EPSCs (clamped to {})'.format(VClamp.amp[0]))
 	ax[1].set_ylabel('I (nA)')
-	ax[1].plot(list(t)[idx_start:idx_mid], list(i)[idx_start:idx_mid])
+	ax[1].plot(list(t)[idx_start:idx_mid], list(i_clamp)[idx_start:idx_mid])
 
-	idx_start2 = [j for j in range(len(i)-1) if (j>idx_mid) and (abs(i[j+1]-i[j])<0.0001)][0]
+	idx_start2 = [j for j in range(len(i_clamp)-1) if (j>idx_mid) and (abs(i_clamp[j+1]-i_clamp[j])<0.0001)][0]
 	ax[2].set_title('IPSCs (clamped to {})'.format(VClamp.amp[1]))
 	ax[2].set_ylabel('I (nA)')
 	ax[2].set_xlabel('T (ms)')
-	ax[2].plot(list(t)[idx_start2:], list(i)[idx_start2:])
+	ax[2].plot(list(t)[idx_start2:], list(i_clamp)[idx_start2:])
 
 elif exp_type == 'one_step':
 
@@ -359,22 +368,23 @@ elif exp_type == 'one_step':
 		ax.plot(t, SOM_pop.cells['SOM0']['soma_v'], label='SOM')
 
 	ax2 = ax.twinx()		
-	ax2.plot(t, i, 'k', label='Current')
+	ax2.plot(t, i_clamp, 'k', label='Current')
 	ax2.set_ylim([-0.9, 0.2])
 	ax.set_xlabel('T (ms)')                                                 
 	ax.set_ylabel('Presynaptic Soma Voltages')                           
 	ax2.set_ylabel('Current through VClamp (nA)')  
-	plt.suptitle('Postsynaptic Soma ({} cell) Clamped to {}'.format(clamped_cell, VClamp.amp[0]))        
+	plt.suptitle('Postsynaptic Soma ({} cell) Clamped to {}'.format(clamped_cell, VClamp.amp[0]))   
+	plt.title('SOM_to_Pyr_weight = {}, PV_to_Pyr_weight = {}'.format(SOM_to_Pyr_weight, PV_to_Pyr_weight))     
 
 	ax.legend(loc='upper left')
-	ax2.legend()              
+	ax2.legend()  
 	
 	if thalamic_to_Pyr:
-		baseline = min([abs(j) for j in list(i)[int(200/h.dt):]])
+		baseline = min([abs(j) for j in list(i_clamp)[int(200/h.dt):]])
 		f, ax = plt.subplots()
 		ax.plot(t, Pyr_pop.cells['Pyr0']['soma_v'], label='Voltage')
 		ax2 = ax.twinx()
-		ax2.plot(t, i, 'k', label='Current')
+		ax2.plot(t, i_clamp, 'k', label='Current')
 		ax2.set_ylim([baseline-0.8, baseline+0.2])
 		ax.set_xlabel('T (ms)')                                                 
 		ax.set_ylabel('Postsynaptic Soma Voltage')                           
@@ -382,7 +392,41 @@ elif exp_type == 'one_step':
 		plt.suptitle('Postsynaptic Soma ({} cell) Clamped to {}'.format(clamped_cell, VClamp.amp[0]))        
 
 		ax.legend(loc='upper left')
-		ax2.legend()              
+		ax2.legend()   
+
+	# Plot current through VClamp for different holding potentials
+	flatten = lambda vec: [j for m in vec for j in m] 
+	h.tstop = 2200 
+	plt.figure() 
+	all_mean = []
+	COLORS = iter(['skyblue', 'orange', 'crimson', 'blue', 'xkcd:magenta', 'orchid', 'green'])
+	AMPs = range(-100, 21, 20)
+
+	# COLORS = iter(['k', 'darkblue', 'skyblue','orange','xkcd:magenta'])
+	# AMPs = [-95, -85, -70, -40, -15]
+	for amp1 in AMPs: 
+		VClamp.amp[0] = amp1 
+		VClamp2.amp[0] = amp1 
+		h.run() 
+		color_=next(COLORS) 
+		MEAN = [] 
+		for axon in Pyr_pop.inputs['Pyr0']: 
+			# for C in range(len(Pyr_pop.inputs['Pyr0'][axon]['synapses'])): 
+				# AMPA = Pyr_pop.inputs['Pyr0'][axon]['i_AMPA'][C] 
+ 				# NMDA = Pyr_pop.inputs['Pyr0'][axon]['i_NMDA'][C] 
+				# TOT = [AMPA[j]+NMDA[j] for j in range(len(AMPA))] 
+				# peaks = [1000*(TOT[j]) for j in range(len(TOT)-1) if (TOT[j]>TOT[j-1]) and (TOT[j]>TOT[j+1])] 
+
+			peaks = [1000*i_clamp[j] for j in range(2000, len(i_clamp)-1) if (abs(i_clamp[j])>abs(i_clamp[j-1])) and (abs(i_clamp[j])>abs(i_clamp[j+1]))]
+			plt.plot([amp1]*len(peaks), peaks,'.',color=color_) 
+			MEAN.append(peaks) 
+		
+		plt.plot(amp1, np.mean(flatten(MEAN)), 'o', color="none", markeredgecolor='k') 
+		all_mean.append(np.mean(flatten(MEAN)))
+	
+	plt.ylabel('I (pA)') 
+	plt.plot(AMPs, all_mean, 'k', LineWidth=0.3)            
+           
 
 elif exp_type == 'find_reversal':
 	plt.figure()
@@ -395,16 +439,16 @@ elif exp_type == 'find_reversal':
 
 		h.run()
 
-		baseline = min([abs(j) for j in list(i)[int(200/h.dt):]])
+		baseline = min([abs(j) for j in list(i_clamp)[int(200/h.dt):]])
 
-		plt.plot(t, [j-baseline for j in i], label=r'$V_{amp}$ = '+str(VClamp.amp[0]))
+		plt.plot(t, [j-baseline for j in i_clamp], label=r'$V_{amp}$ = '+str(VClamp.amp[0]))
 
 	plt.legend()
 	plt.ylim([0.02, 0.05])
 
 
 plt.figure()
-plt.plot(v, i)
+plt.plot(v, i_clamp)
 
 
 

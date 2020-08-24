@@ -302,7 +302,7 @@ if run_plot_function:
 	stim_ax = plotThalamicResponses(stimuli, stand_freq, dev_freq, thalamic_locations, run_function=True)
 
 # ===============================================  Create Cell Populations  ===============================================
-Pyr_pop, PV_pop, SOM_pop = CreatePopulations(n_pyr=1, n_PV=1, n_SOM=1)
+Pyr_pop, PV_pop, SOM_pop = CreatePopulations(n_pyr=0, n_PV=1, n_SOM=0)
 # Pyr_pop, PV_pop, SOM_pop = CreatePopulations(n_pyr=1, n_PV=len(chosen_GIDs['PV']), n_SOM=1)
 
 # ==============================================  Connect Populations with Synapses and Inputs  ==============================================
@@ -320,13 +320,13 @@ else:
 if connect_PV_to_Pyr: print('\n***WARNING: Assuming isopotential soma and perisomatic PV connections: all PV synapses are placed on soma(0.5)')
 
 # PV ==> Pyr (either from PV spike times or PV soma voltage)
-set_CorticalInputs(pre_pop=PV_pop, post_pop=Pyr_pop, connect_pops=connect_PV_to_Pyr, weight=PV_to_Pyr_weight, which_secs=['soma'], syn_specs=PV_to_Pyr_syn_specs, record_syns=record_PV_syns, delay=PV_output_delay)
+set_CorticalInputs(pre_pop=PV_pop, post_pop=Pyr_pop, connect_pops=connect_PV_to_Pyr, weight=PV_to_Pyr_weight, syn_specs=PV_to_Pyr_syn_specs, which_secs=[i for i in ['soma', 'basal', 'apical'] if i in PV_to_Pyr_syn_specs], record_syns=record_PV_syns, delay=PV_output_delay)
 
 # SOM ==> PV
-set_CorticalInputs(pre_pop=SOM_pop, post_pop=PV_pop, connect_pops=connect_SOM_to_PV, weight=SOM_to_PV_weight, which_secs=['soma', 'basal_dendrites'], syn_specs=SOM_to_PV_syn_specs, record_syns=record_SOM_syns, delay=SOM_output_delay)
+set_CorticalInputs(pre_pop=SOM_pop, post_pop=PV_pop, connect_pops=connect_SOM_to_PV, weight=SOM_to_PV_weight, syn_specs=SOM_to_PV_syn_specs, which_secs=[i for i in ['soma', 'basal', 'apical'] if i in SOM_to_PV_syn_specs], record_syns=record_SOM_syns, delay=SOM_output_delay)
 
 # SOM ==> Pyr
-set_CorticalInputs(pre_pop=SOM_pop, post_pop=Pyr_pop, connect_pops=connect_SOM_to_Pyr, weight=SOM_to_Pyr_weight, which_secs=['apical_dendrites'], syn_specs=SOM_to_Pyr_syn_specs, record_syns=record_SOM_syns, delay=SOM_output_delay)
+set_CorticalInputs(pre_pop=SOM_pop, post_pop=Pyr_pop, connect_pops=connect_SOM_to_Pyr, weight=SOM_to_Pyr_weight, syn_specs=SOM_to_Pyr_syn_specs, which_secs=[i for i in ['soma', 'basal', 'apical'] if i in SOM_to_Pyr_syn_specs], record_syns=record_SOM_syns, delay=SOM_output_delay)
 
 # ============================================== Run Simulation ==============================================
 if record_channel:
@@ -338,6 +338,15 @@ print('\n========== Running Simulation (time: {}:{:02d}) =========='.format(time
 
 events = h.FInitializeHandler(putspikes)
 
+total_I = {}
+for sec in PV_pop.cells['PV0']['cell'].all:
+	sec.insert('extracellular')
+	total_I[sec.name()] = {}
+	for seg in sec:
+		total_I[sec.name()][seg] = h.Vector()
+		total_I[sec.name()][seg].record(seg._ref_i_membrane) # Units of i_membrane: mA/cm2
+
+
 # print('NOTICE: Changing g_pas to 0.001!')
 # for sec in h.allsec():
 # 	sec.g_pas = 0.001
@@ -348,6 +357,57 @@ end_time = time_module.time()
 
 os.system("say done")
 print("Simulation took %i seconds"%(end_time-start_time))
+
+I = []
+for sec in total_I: 
+	sec_obj = [i for i in h.allsec() if i.name()==sec][0]
+	for seg in total_I[sec]: 
+		seg_L = sec_obj.L / sec_obj.nseg
+		seg_rad = sec_obj.diam / 2
+		seg_area = seg_L * 2 * np.pi * seg_rad
+		temp_scaled_I = [i*seg_area for i in total_I[sec][seg]]
+		I.append(temp_scaled_I) 
+I = np.sum(I, axis=0)
+
+int_I = [] 
+window = [0,100] 
+plt.figure() 
+plt.title(r'$I_{membrane}$ Integral in window of '+'{}-{}ms After Stimulus vs. Corresponding Spike Count'.format(window[0], window[1]))    
+plt.xlabel('Integral') 
+plt.ylabel('no. spikes')
+stim_times = [i[0] for i in cPickle.load(open(filenames['stim_times'], 'rb'))[6666]]
+for T in stim_times: 
+	if T<=h.tstop: 
+		idx1 = int((T+window[0])/h.dt) 
+		idx2 = int((T+window[1])/h.dt) 
+		
+		# Integrate
+		I_window = list(I)[idx1:idx2] 
+		temp_integral = np.cumsum([i*h.dt for i in I_window])
+
+		int_I.append(temp_integral) 
+		V = list(PV_pop.cells['PV0']['soma_v'])[idx1:idx2] 
+		n_spikes = len([i for i in range(1, len(V)-1) if (V[i]>V[i-1]) and (V[i]>V[i+1]) and (V[i]>0)]) 
+		# plt.plot(int_I[-1], n_spikes, 'g.') 
+
+plt.figure()
+plt.hist(int_I)
+plt.title(r'Histogram of $I_{membrane}$' + ' Integral for window of {}-{}ms After Stimulus'.format(window[0], window[1]))    
+plt.xlabel('Integral')
+plt.ylabel('Count')
+
+plt.figure()
+plt.title('Total Membrane Current')
+plt.plot(t, I)
+plt.xlabel('T (ms)')
+plt.ylabel('I (mA)')
+for T in stim_times:
+	if T<=h.tstop:
+		plt.axvline(T, color='gray', LineStyle='--')
+
+
+
+
 
 dump_somas = False
 if dump_somas:
@@ -389,24 +449,64 @@ if record_channel:
 		if T <= h.tstop:
 			plt.axvline(T, LineStyle='--',color='gray',LineWidth=1) 
 
+# Cross-correlation of Pyramidal spikes around thalamic spikes
 Vs = []
-window = 100
+window = 50
 V = Pyr_pop.cells['Pyr0']['soma_v']
 spike_times = [t[i] for i in range(len(t)) if (V[i]>spike_threshold) and (V[i]>V[i-1]) and (V[i]>V[i+1])]
+stim_times = cPickle.load(open(filenames['stim_times'], 'rb'))[6666]
+stim_times = [i[0] for i in stim_times if i[0]<=tstop]
+stim_window_after = 50
+stim_intervals = [[i, i+stim_window_after] for i in stim_times]
 
+dt = h.dt 
+
+spont_window_spikes, stim_window_spikes = [], []
+spont_thalamic, stim_thalamic = [], []
+spont_v, stim_v = [], []
 for axon in Pyr_pop.inputs['Pyr0']:
 	for T in Pyr_pop.inputs['Pyr0'][axon]['stim_times']:
 		if T<=h.tstop:
 			idx1 = int((T-window)/h.dt)
 			idx2 = int((T+window)/h.dt)
+			if idx1>=0 and idx2*dt<=tstop: 
+				T1 = t[idx1] 
+				T2 = t[idx2] 
 
-		window_spikes = [i for i in spike_times if (i>list(t)[idx1]) and (i<list(t)[idx2])]
+				spikes_in_window = [i-T for i in spike_times if (i>=T1) and (i<=T2)]
+				thalamic_spike_is_evoked = any([(T>=i[0]) and (T<=i[1]) for i in stim_intervals])
+				
+				# thalamic_spike_is_evoked = T>=2000
 
+				if thalamic_spike_is_evoked:
+					stim_thalamic.append(T)
+					stim_window_spikes.append(spikes_in_window)
+					stim_v.append(list(V)[idx1:idx2])
+				else:
+					spont_thalamic.append(T)
+					spont_window_spikes.append(spikes_in_window)
+					spont_v.append(list(V)[idx1:idx2])
 
-		# if idx1>=0 and idx2*dt<=tstop:
-		# 	Vs.append(list(v)[idx1:idx2])
+flatten = lambda vec: [j for i in vec for j in i]
 plt.figure()
-plt.hist([m for k in Vs for m in k], bins=2)
+stim_H, B1 = np.histogram(flatten(stim_window_spikes), bins=50)
+stim_H = [i/sum(stim_H) for i in stim_H]
+spont_H, B2 = np.histogram(flatten(spont_window_spikes), bins=50)
+spont_H = [i/sum(spont_H) for i in spont_H]
+plt.bar(B1[:-1], stim_H, alpha=0.5, label='Stimulus', width=np.diff(B1)[0])
+plt.bar(B2[:-1], spont_H, alpha=0.5, label='Spontaneous', width=np.diff(B2)[0])
+plt.axvline(0, LineStyle='--', color='gray', label='Thalamic Spike')
+plt.legend()
+plt.suptitle('Histogram of Pyramidal Spike Times, Around Spontaneous & Evoked Thalamic Spikes') 
+plt.xlabel('Per-Stimulus Time (ms)')
+plt.ylabel('n_spikes')
+plt.title('Simulation length: %sms'%format(int(tstop), ',d')) 
+
+
+
+
+
+
 
 '''
 stim_times = [i[0] for i in stimuli[6666].stim_times_all]

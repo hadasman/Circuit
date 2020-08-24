@@ -155,22 +155,23 @@ if run_plot_function:
 
 # ============================================== Plot example responses ==============================================
 if PV_data:
-	Wehr_Zador_fromData(PV_data, 'PV0', stim_times, dt=h.dt, tstop=tstop, t=t, exc_weight=PV_input_weight, standard_freq=stand_freq, spike_threshold=spike_threshold)
+	Wehr_Zador_fromData(job_id, PV_data, 'PV0', stim_times, dt=h.dt, tstop=tstop, t=t, exc_weight=PV_input_weight, standard_freq=stand_freq, spike_threshold=spike_threshold)
 if Pyr_data:
-	Wehr_Zador_fromData(Pyr_data, 'Pyr0', stim_times, dt=h.dt, tstop=tstop, t=t, exc_weight=Pyr_input_weight, standard_freq=stand_freq, spike_threshold=spike_threshold)
+	Wehr_Zador_fromData(job_id, Pyr_data, 'Pyr0', stim_times, dt=h.dt, tstop=tstop, t=t, exc_weight=Pyr_input_weight, standard_freq=stand_freq, spike_threshold=spike_threshold)
 if SOM_data:
-	Wehr_Zador_fromData(SOM_data, 'SOM0', stim_times, dt=h.dt, tstop=tstop, t=t, exc_weight=SOM_input_weight, standard_freq=stand_freq, spike_threshold=spike_threshold)
+	Wehr_Zador_fromData(job_id, SOM_data, 'SOM0', stim_times, dt=h.dt, tstop=tstop, t=t, exc_weight=SOM_input_weight, standard_freq=stand_freq, spike_threshold=spike_threshold)
 		
 
 FR_ax = None
-C = iter(['skyblue', 'orange', 'crimson'])
+# C = iter(['skyblue', 'orange', 'crimson'])
+C = iter(['xkcd:fuchsia', 'xkcd:azure', 'grey'])
 for data in [PV_data, SOM_data, Pyr_data]:
 	if data:
 		temp_cell = list(data.keys())[0]
 		soma_v = data[temp_cell]['soma_v']
 		temp_which_cell = temp_cell.split([i for i in temp_cell if i.isdigit()][0])[0]
 		
-		FR_ax = plotFRs([i[0] for i in stim_times], soma_v, t, tstop=tstop, window=6, which_cell=temp_which_cell, axes_h=FR_ax, color=next(C))
+		FR_ax = plotFRs(job_id, [i[0] for i in stim_times], soma_v, t, tstop=tstop, window=15, which_cell=temp_which_cell, axes_h=FR_ax, color=next(C))
 
 somas_dict = {}
 for n, d in [['Pyr0', Pyr_data], ['PV0', PV_data], ['SOM0', SOM_data]]:
@@ -306,19 +307,6 @@ if record_channel:
 	for T in stim_times: 
 		if T <= tstop:
 			ax2.axvline(T, LineStyle='--',color='gray',LineWidth=1) 
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

@@ -1,6 +1,10 @@
 import pandas as pd
 
-connect_interneurons = True
+connect_interneurons=True
+upload_cortical_syn_locs = True
+connect_PV_to_Pyr  = True
+connect_SOM_to_Pyr = True
+connect_SOM_to_PV  = True
 
 record_thalamic_syns = False  # Thalamic source (presynaptic)
 record_Pyr_syns 	 = False # Pyr source (presynaptic)
@@ -26,28 +30,28 @@ PV_input_weight  = 0.4
 Pyr_input_weight = 0.5
 SOM_input_weight = 0.4
 
-PV_to_Pyr_weight = 0.8
+PV_to_Pyr_weight = 0.5
+SOM_to_Pyr_weight = 0.3 
 
 # SOM => Pyr
 n_SOMs_to_Pyr     = 11 # From BB connectivity data, based on cell types below
 n_syns_SOM_to_Pyr = 11 * n_SOMs_to_Pyr # From BB connectivity data, based on cell types below
-SOM_to_Pyr_weight = PV_to_Pyr_weight # CHECK THIS
 
 # SOM => PV
 # n_SOMs_to_PV 	 = 5 # From BB connectivity data, based on cell types below
-n_syns_SOM_to_PV = 200 #11 * n_SOMs_to_PV # From BB connectivity data, based on cell types below
-SOM_to_PV_weight = PV_to_Pyr_weight # CHECK THIS
+n_syns_SOM_to_PV = 200 # 11 * n_SOMs_to_PV # From BB connectivity data, based on cell types below
+SOM_to_PV_weight = SOM_to_Pyr_weight # CHECK THIS
 
 pyr_type = 'L4_PC'
 not_PVs = ['PC', 'SP', 'SS', 'MC', 'BTC', 'L1']
 SOM_types = ['MC']
 
 PV_input_delay 	= 0 # TEMPORARY: CHANGE THIS
-Pyr_input_delay = PV_input_delay + 4 # 4 taken from Tohar paper (Fig 4- Supp. 2a)
-SOM_input_delay = Pyr_input_delay # 4 taken from Tohar paper (Fig 4- Supp. 2a)
+Pyr_input_delay = PV_input_delay + 4 # taken from Tohar paper (Fig 4- Supp. 2a)
+SOM_input_delay = PV_input_delay + 3 # taken from Tohar paper (Fig 4- Supp. 2a)
 
 PV_output_delay = Pyr_input_delay + 5 # TEMPORARY: CHECK THIS
-SOM_output_delay = PV_output_delay
+SOM_output_delay = 0#PV_output_delay
 
 freq1 = 6666
 freq2 = 9600
@@ -58,8 +62,8 @@ spike_threshold = 0
 filenames = {'cell_details': 'thalamocortical_Oren/thalamic_data/cells_details.pkl', 
 		 'thalamic_locs': 'thalamocortical_Oren/thalamic_data/thalamic_axons_location_by_gid.pkl',
 		 'thalamic_connections': 'thalamocortical_Oren/thalamic_data/thalamo_cortical_connectivity.pkl',
-		 'thalamic_activations_6666': 'thalamocortical_Oren/SSA_spike_times/input6666_success_150_before_150_after_only_to_pyr.p',
-		 # 'thalamic_activations_6666': 'thalamocortical_Oren/SSA_spike_times/input6666_by_gid.p',
+		 # 'thalamic_activations_6666': 'thalamocortical_Oren/SSA_spike_times/input6666_success_150_before_150_after_only_to_pyr.p',
+		 'thalamic_activations_6666': 'thalamocortical_Oren/SSA_spike_times/input6666_by_gid.p',
 		 'thalamic_activations_9600': 'thalamocortical_Oren/SSA_spike_times/input9600_by_gid.p',
 		 'PV_spike_times': 'thalamocortical_Oren/SSA_spike_times/PV_spike_times/PV_spike_times_tstop_10000_input6666_by_gid.p',
 		 'pyr_connectivity': 'thalamocortical_Oren/pyramidal_connectivity_num_connections.p',

@@ -105,7 +105,7 @@ def Wehr_Zador(population, cell_name, stimuli, title_, exc_weight=0, inh_weight=
 
 	plt.suptitle('{} (GID: {}) Cell ({} spikes out of {})'.format(title_, population.name_to_gid[cell_name], spike_count, len(times)))
 	axes[0].axvline(take_before, LineStyle='--', color='gray')
-	axes[0].set_title('Overlay of Somatic Responses to %sHz Simulus (locked to stimulus prestntation)'%standard_freq)
+	axes[0].set_title('Overlay of Somatic Responses to %sHz Simulus (locked to stimulus presentation)'%standard_freq)
 	axes[0].set_ylabel('V (mV)')
 	axes[0].set_xlim([0, take_before+take_after])
 	
@@ -184,7 +184,7 @@ def PlotSomas(populations, t, stimulus, tstop=None, spike_threshold=None, dt=0.0
 
 	return h_ax
 
-def plotFRs(stim_times, soma_v, t, tstop=0, window=0, take_before=150, take_after=150, which_cell='', axes_h=None, color=''):
+def plotFRs(job_id, stim_times, soma_v, t, tstop=0, window=0, take_before=150, take_after=150, which_cell='', axes_h=None, color=''):
 	def get_SpikeTimes(t, soma_v, threshold=0):
 
 		spike_idx = [i for i in range(1, len(soma_v)) if (soma_v[i] > threshold) and 
@@ -224,9 +224,10 @@ def plotFRs(stim_times, soma_v, t, tstop=0, window=0, take_before=150, take_afte
 		H, B = np.histogram([j for i in PSTH for j in i], bins=bins)
 
 		if normalized:			
-			H = [i/max(H) for i in H]
+			# H = [i/max(H) for i in H]
+			H = [i/sum(H) for i in H]
 			h_ax.set_title('Normalized PSTH of Cell with Thalamic Input')
-			h_ax.set_ylabel('Normalized Spike Count')
+			h_ax.set_ylabel('Spike Frequency (Normalized Spike Count)')
 		else:			
 			h_ax.set_title('PSTH of Cell with Thalamic Input')
 			h_ax.set_ylabel('Spike Count')
@@ -238,7 +239,6 @@ def plotFRs(stim_times, soma_v, t, tstop=0, window=0, take_before=150, take_afte
 		h_ax.set_xlabel('Peri-Stimulus Time')
 
 	def plot_FR(h_ax, FRs, normalized=False):
-
 		mean_FRs, mean_inters = [], []
 		for interval_str in FRs:
 			interval = [int(j) for j in interval_str.split('[')[1].split(']')[0].split(',')]
@@ -246,7 +246,7 @@ def plotFRs(stim_times, soma_v, t, tstop=0, window=0, take_before=150, take_afte
 			mean_inters.append(np.mean(interval))
 
 		if normalized:
-			h_ax.plot(mean_inters, [i/max(mean_FRs) for i in mean_FRs], label=which_cell, color=color)
+			h_ax.plot(mean_inters, [i/sum(mean_FRs) for i in mean_FRs], label=which_cell, color=color)
 			h_ax.set_title('Normalized Mean Firing Rate for Cell with Thalamic Input')
 			h_ax.set_ylabel('Normalized Firing Rate (Hz)')
 
@@ -281,14 +281,14 @@ def plotFRs(stim_times, soma_v, t, tstop=0, window=0, take_before=150, take_afte
 	plot_FR(FR_ax_norm, FRs, normalized=True)
 	plt.gcf().subplots_adjust(hspace=0.34, bottom=0.08, top=0.9) 
 
-	plt.suptitle('Simulation details: {}ms bins, simulation length: {}s'.format(window, int(tstop/1000)))
+	plt.suptitle('Simulation details: {}ms bins, simulation length: {}s, job: {}'.format(window, int(tstop/1000), job_id))
 
 	return [[PSTH_ax, PSTH_ax_norm], [FR_ax, FR_ax_norm]]
 
 
 
 
-def Wehr_Zador_fromData(data, cell_name, stim_times, exc_weight=0, inh_weight=0, standard_freq=6666, take_before=20, take_after=155, tstop=None, spike_threshold=0, dt=0.025, t=None):
+def Wehr_Zador_fromData(job_id, data, cell_name, stim_times, exc_weight=0, inh_weight=0, standard_freq=6666, take_before=20, take_after=155, tstop=None, spike_threshold=0, dt=0.025, t=None):
 
 	def getData(data, cell_name):
 		g_AMPA = data[cell_name]['inputs']['g_AMPA']
@@ -334,8 +334,8 @@ def Wehr_Zador_fromData(data, cell_name, stim_times, exc_weight=0, inh_weight=0,
 
 		h_ax.axvline(take_before, LineStyle='--', color='gray')
 		h_ax.plot(t_vec, [AMPA[i]+NMDA[i] for i in range(n_points)], 'purple', label='%s$_{AMPA}$ + %s$_{NMDA}$'%(which_plot, which_plot))
-		h_ax.plot(t_vec, AMPA, 'purple', label='AMPA', alpha=0.5)
-		h_ax.plot(t_vec, NMDA, 'purple', label='NMDA', alpha=0.3)
+		# h_ax.plot(t_vec, AMPA, 'purple', label='AMPA', alpha=0.5)
+		# h_ax.plot(t_vec, NMDA, 'purple', label='NMDA', alpha=0.3)
 		if 'g_GABA' in all_means:
 			GABA = {}
 
@@ -418,9 +418,9 @@ def Wehr_Zador_fromData(data, cell_name, stim_times, exc_weight=0, inh_weight=0,
 	n_points = len(t_vec_tot)
 
 	title_ = cell_name.split([i for i in cell_name if i.isdigit()][0])[0]
-	plt.suptitle('{} (GID: {}) Cell ({} spikes out of {})'.format(title_, gid, spike_count, len(times)))
+	plt.suptitle('{} (GID: {}) Cell ({} spikes out of {}), Job {}'.format(title_, gid, spike_count, len(times), job_id))
 	axes[0].axvline(take_before, LineStyle='--', color='gray')
-	axes[0].set_title('Overlay of Somatic Responses to %sHz Simulus (locked to stimulus prestntation)'%standard_freq)
+	axes[0].set_title('Overlay of Somatic Responses to %sHz Simulus (locked to stimulus presentation)'%standard_freq)
 	axes[0].set_ylabel('V (mV)')
 	axes[0].set_xlim([0, take_before+take_after])
 	

@@ -21,6 +21,8 @@ assert os.getcwd().split('/')[-1] == 'Circuit', 'Wrong directory'
 if len(sys.argv)>1:
 	tstop = float(sys.argv[1])
 	print('Setting tstop to {}ms'.format(tstop))
+else:
+	tstop = 20000
 # ============================================  Define Functions  ============================================
 '''
 Plan:
@@ -116,6 +118,31 @@ def set_ThalamicInputs(Pyr_pop, PV_pop, SOM_pop, thalamic_GIDs):
 		print('\n==================== Connecting thalamic inputs to SOM cell (on {}, standard: {}Hz, input weight: {}uS) ===================='.format(where_SOM_syns_str, stand_freq, SOM_input_weight)); sys.stdout.flush()
 
 		SOM_pop.addInput('SOM0', record_syns=record_thalamic_syns, where_synapses=where_SOM_syns, weight=SOM_input_weight, thalamic_activations_filename=activated_filename, connecting_gids=thalamic_GIDs['to_SOM']) 
+
+def set_CorticalInputs(pre_pop=None, post_pop=None, connect_pops=True, weight=None, which_secs=[], syn_specs=None, record_syns=None, delay=None):
+	def get_post_secs(which_secs, pop, cell):
+
+		assert type(which_secs)==list, 'invalid input type! (which_secs variablem in set_CorticalInputs())'
+		pre_to_post_secs = []
+		for SEC in which_secs:
+			if SEC=='soma':
+				pre_to_post_secs = pre_to_post_secs + [pop.cells[cell][SEC]]
+			else:
+				KEY = [i for i in pop.cells[cell] if SEC in i][0]
+				pre_to_post_secs = pre_to_post_secs + pop.cells[cell][KEY]
+
+		return pre_to_post_secs 
+
+	#POST=Pyr, PRE=PV
+	if pre_pop and post_pop and connect_pops:
+		print('\n========== Connecting {} population to {} (connection weight: {}uS) ===================='.format(pre_pop.population_name, post_pop.population_name, weight))
+		
+		for post_cell in post_pop.cells:
+			pre_to_post_secs = get_post_secs(which_secs, post_pop, post_cell)
+
+			for pre_cell in pre_pop.cells:
+				post_pop.connectCells(post_cell, pre_pop, pre_cell, pre_to_post_secs, syn_specs, record_syns=record_syns, weight=weight, delay=delay, input_source='voltage', threshold=spike_threshold) # Adds self.connections to Population				
+	return
 
 def CreatePoisson(spont_FR, tstop, bins=5, verbose=True, rnd_seed=None):
 	spike_times = []  
@@ -258,22 +285,15 @@ def RunSim(v_init=-75, tstop=154*1000, print_=''):
 record_thalamic_syns = True
 
 # ============================================  Define Constants  ============================================
-
-n_syns_SOM_to_PV = 200
-tstop 			 = 20000
 SOM_input_delay  = 0
 SOM_output_delay = 0
 dt = h.dt
-SOM_to_Pyr_weight = 0.3
-PV_to_Pyr_weight = 0.3
-SOM_to_PV_weight = 0.3
 
 input_source = 'spont' # or: 'spont' or stim'
 types_dict = {'pre': 'SOM', 
 			  'post': 'PV'}
 
 spont_FR = {'PV': 1.5, 'SOM': 1.5, 'Pyr': 3}
-
 
 get_spike_times = lambda soma_v, thresh: [t[idx] for idx in [i for i in range(len(soma_v)) if (soma_v[i]>thresh) and (soma_v[i]>soma_v[i-1]) and (soma_v[i]>soma_v[i+1])]]
 
@@ -328,11 +348,26 @@ post_v_without_I = copy(post_pop.cells[post_cell]['soma_v'])
 post_inputs_without_I = copy(post_pop.inputs[post_cell])
 
 # ========================================================= 2nd simulation =======================================================================================
-post_pop.connectCells(post_cell, pre_pop, pre_cell, [post_pop.cells[post_cell]['soma']], ['random', n_syns], record_syns=True, 
-																									   input_source='voltage', 
-																									   weight=SOM_to_PV_weight, 
-																									   delay=SOM_output_delay, 
-																									   threshold=spike_threshold) 
+connection_dict 	= {'PV': 
+							{'Pyr': {'weight': PV_to_Pyr_weight, 'syn_specs': 'synapse_locs_instantiations/PV_to_Pyr_syn_locs_soma.p'}}, 
+					   'SOM': 
+							{'PV': {'weight': SOM_to_PV_weight, 'syn_specs': 'synapse_locs_instantiations/SOM_to_PV_syn_locs_soma_basal.p'}, 
+				  			 'Pyr': {'weight': SOM_to_Pyr_weight, 'syn_specs': 'synapse_locs_instantiations/SOM_to_Pyr_syn_locs_apical.p'}}}
+
+output_delays_dict 	= {'PV': PV_output_delay, 'SOM': SOM_output_delay}
+
+WEIGHT 			= connection_dict[types_dict['pre']][types_dict['post']]['weight']
+SYN_SPECS 		= connection_dict[types_dict['pre']][types_dict['post']]['syn_specs']
+WHICH_SECS 		= [i for i in ['soma', 'basal', 'apical'] if i in SYN_SPECS]
+OUTPUT_DELAY 	= output_delays_dict[types_dict['pre']]
+
+set_CorticalInputs(pre_pop=pre_pop, post_pop=post_pop, weight=WEIGHT, which_secs=WHICH_SECS, syn_specs=SYN_SPECS, delay=OUTPUT_DELAY)
+
+# post_pop.connectCells(post_cell, pre_pop, pre_cell, [post_pop.cells[post_cell]['soma']], ['random', n_syns], record_syns=True, 
+# 																									   input_source='voltage', 
+# 																									   weight=SOM_to_PV_weight, 
+# 																									   delay=SOM_output_delay, 
+# 																									   threshold=spike_threshold) 
 
 t, n_spikes_connected = RunSim(tstop = tstop, print_='Running simulation ({} inputs to {})'.format(types_dict['pre'], types_dict['post']))
 
@@ -347,7 +382,8 @@ soma_ax.set_xlabel('T (ms)')
 soma_ax.set_ylabel('V (mV)')
 
 soma_ax.plot(t, post_v_without_I, label='Uninhibited', color='xkcd:azure', LineWidth=2.5) 
-soma_ax.plot(t, post_v_with_I, label='Connected to SOM', color='xkcd:coral', LineWidth=2.5, alpha=0.6) 
+soma_ax.plot(t, post_v_with_I, label='Connected to {}'.format(types_dict['pre']), color='xkcd:coral', LineWidth=2.5, alpha=0.6) 
+soma_ax.axvline(SOM_start, LineStyle='--', color='gray', LineWidth=1.5, label='{} starts spiking'.format(types_dict['pre']))
 soma_ax.legend()
 
 # ========================================================= Plot Cross Correlation =======================================================================================
@@ -514,7 +550,7 @@ def plot_splitFR(post_v, SOM_start=None, bins=1):
 	ax.bar([1, 2], [mean_FR_no_I, mean_FR_with_I], yerr=[se_no_I, se_with_I])
 	ax.set_xticks([1, 2])
 	ax.set_xticklabels(['No Inh.', '{} inh.'.format(types_dict['pre'])])
-	ax.set_title('{} Firing Rate With & Without {} Inhibition (bins = {})'.format(types_dict['post'], types_dict['pre'], bins))
+	ax.set_title('{} Firing Rate With & Without {} Inhibition (bins = {}, errors: SE)'.format(types_dict['post'], types_dict['pre'], bins))
 	ax.set_ylabel('FR (Hz)')
 
 if input_source=='spont':
