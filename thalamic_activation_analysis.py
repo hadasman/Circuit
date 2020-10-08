@@ -10,25 +10,18 @@ from tqdm import tqdm
 import multiprocessing
 from time import time
 
-from Population import Population
-from Stimulus import Stimulus
-from Connectivity import Connectivity
 from Parameter_Initialization import * # Initialize parameters before anything else!
 from plotting_functions import plotThalamicResponses, Wehr_Zador, PlotSomas, plotFRs
-
-
 thalamic_locs_filename		  	     = 'thalamocortical_Oren/thalamic_data/thalamic_axons_location_by_gid.pkl'
 thal_connections_filename 	  	   	 = 'thalamocortical_Oren/thalamic_data/thalamo_cortical_connectivity.pkl'
-thalamic_activations_filenames 		 = {}
-# thalamic_activations_filenames[6666] = 'thalamocortical_Oren/SSA_spike_times/input6666_106746.dat'
-# thalamic_activations_filenames[6666] = filenames['thalamic_activations_6666']
-# thalamic_activations_filenames[9600] = filenames['thalamic_activations_9600']
-print('*****\n Analyzing files from test_original\n*****')
-thalamic_activations_filenames[6666] = 'thalamocortical_Oren/CreateThalamicInputs/Oren_original_with_tidying_ip/test_original/input6666_106746_3.p'
-thalamic_activations_filenames[9600] = 'thalamocortical_Oren/CreateThalamicInputs/Oren_original_with_tidying_ip/test_original/input6666_106746_3.p'
+flatten = lambda list: [j for i in list for j in i]
 
-# thalamic_activations_filenames[9600] = 'thalamocortical_Oren/SSA_spike_times/input9600_109680.dat'
-stim_times_filename 			     = 'thalamocortical_Oren/SSA_spike_times/stim_times.p'
+# ========================================== Define Stimulus to Analyze ==========================================
+thalamic_activations_filenames = {6666: 'thalamocortical_Oren/CreateThalamicInputs/test_times/single_tone/input6666_106746_BroadBand_single_IPI_2000.p', 
+								  9600: 'thalamocortical_Oren/CreateThalamicInputs/test_times/single_tone/input9600_109680_BroadBand_single_IPI_2000.p'}
+# stim_times_filename 			     = 'thalamocortical_Oren/CreateThalamicInputs/test_times/stim_times_pairs_120.p'
+stim_pairs_interval = None
+inter_pair_interval = 2000
 
 locs = pd.read_pickle(thalamic_locs_filename)
 # locs = locs.set_index('gid')
@@ -41,6 +34,23 @@ in_window = lambda time, inter: time > inter[0] and time <= inter[1]
 window = 100
 window_secs = window/1000 # Convert to seconds
 PSTH_window_size = 1.5
+def get_GIDs(upload_from):
+
+	if upload_from:
+		chosen_GIDs = {}
+		chosen_GIDs['pyr'] 			  = cPickle.load(open('{}/chosen_pyr.p'.format(upload_from), 'rb'))
+		chosen_GIDs['PV'] 			  = cPickle.load(open('{}/chosen_PV.p'.format(upload_from), 'rb'))
+		chosen_GIDs['SOM'] 			  = cPickle.load(open('{}/chosen_SOM_high_input.p'.format(upload_from), 'rb'))
+		chosen_PV_n_contacts  		  = cPickle.load(open('{}/chosen_PV_n_contacts.p'.format(upload_from), 'rb'))
+
+		thalamic_GIDs = {}
+		thalamic_GIDs['to_pyr'] = cPickle.load(open('{}/connecting_gids_to_pyr.p'.format(upload_from), 'rb'))
+		thalamic_GIDs['to_PV']  = cPickle.load(open('{}/connecting_gids_to_PV.p'.format(upload_from), 'rb'))
+		thalamic_GIDs['to_SOM'] = cPickle.load(open('{}/connecting_gids_to_SOM_high_input.p'.format(upload_from), 'rb'))
+
+	return chosen_GIDs, chosen_PV_n_contacts, thalamic_GIDs  
+chosen_GIDs, chosen_PV_n_contacts, thalamic_GIDs = get_GIDs('GIDs_instantiations/pyr_72851_between_6666_9600')
+
 
 def worker_job(data_to_send):
 	freq 					= data_to_send[0]
@@ -55,18 +65,24 @@ def worker_job(data_to_send):
 	else:
 		stim_times  = stim_times
 		print('WARNING: not distinguishing between standard and deviant stim times!')
+	
+	if stim_pairs_interval:
+		stim_times = flatten([[i, i+stim_pairs_interval] for i in stim_times])
 	intervals   = [[i, i+window] for i in stim_times]
 
 	# Take only times that were at most <window> ms after stimulus
 	temp_responses = {gid: {'times':[], 'mean_FR': None, 'count': None} for gid in temp_activations}   
-
-	for gid in temp_activations: 
+	activations = {}
+	gids_to_pyr = [i[0] for i in thalamic_GIDs['to_pyr']]
+	for gid in temp_activations:
+		activations[gid] = temp_activations[gid]
 		all_times = temp_activations[gid]
 
 		for time in all_times:
 			time_in_window = any([in_window(time, inter) for inter in intervals])
 			if time_in_window:
 				temp_responses[gid]['times'].append(time)
+
 	
 	# Count responses and mean firing rate
 	for axon in temp_responses: 
@@ -74,7 +90,7 @@ def worker_job(data_to_send):
 		temp_responses[axon]['mean_count'] = np.mean([sum([in_window(time, inter) for time in temp_responses[axon]['times']]) for inter in intervals])
 		temp_responses[axon]['mean_FR'] = (1/window_secs) * temp_responses[axon]['mean_count']
 	
-	return (freq, temp_activations, temp_responses)		
+	return (freq, activations, temp_responses)		
 
 def worker_PSTH(data):
 	stim_time = data[0]
@@ -82,18 +98,19 @@ def worker_PSTH(data):
 	end = data[2]
 	activations = data[3]
 
-	B = np.arange(-20, 50, PSTH_window_size)
+	B = np.arange(start, end, PSTH_window_size)
 	H = []
 
 	interval = [stim_time+start, stim_time+end]
 	gid_count = {}
+	temp_PSTH = []
 	for gid in activations:
 		temp_gid_count = []
 
 		all_times = activations[gid]
 		for act_time in all_times:
 			if in_window(act_time, interval):
-				PSTH[stim_time].append(act_time-stim_time)
+				temp_PSTH.append(act_time-stim_time)
 				temp_gid_count.append(act_time-stim_time)
 
 		gid_count[gid] = temp_gid_count
@@ -103,7 +120,7 @@ def worker_PSTH(data):
 		H.append(temp_H)
 	H = np.mean(H, axis=0)
 
-	return (stim_time, gid_count, H, B)
+	return (stim_time, gid_count, H, B, temp_PSTH)
 
 def plotSpontaneous(filename, spont_interval):
 	activations = cPickle.load(open(filename, 'rb')) # activations = [[spike time, axon gid], ...., [spike time, axon gid]]
@@ -196,7 +213,7 @@ def plotPSTH(activations_dict, stim_times_dict, h_ax=None, BINS=100):
 		PSTH = {i: [] for i in stim_times}
 		n_times = len(stim_times)
 		start = -20
-		end = 50
+		end = 300
 		print('Creating PSTH for {}Hz'.format(freq))
 
 		FRs = {i: {gid: [] for gid in activations}  for i in stim_times}
@@ -209,6 +226,7 @@ def plotPSTH(activations_dict, stim_times_dict, h_ax=None, BINS=100):
 			FRs[stim_time] 	= i[1]
 			H.append(i[2])
 			B 				= i[3]
+			PSTH[stim_time] = i[4]
 
 		H = np.mean(H, axis=0)
 		
@@ -233,7 +251,7 @@ def plotPSTH(activations_dict, stim_times_dict, h_ax=None, BINS=100):
 	FR_ax.axvline(0, LineStyle='--', color='k', label='Stimulus Presentation')
 	FR_ax.set_ylabel('FR (Hz)')
 	FR_ax.set_xlabel('Peri-Stimulus Time (ms)')
-	FR_fig.suptitle('Average Firing Rate in Bins of {}ms Around Auditory Stimulus'.format(PSTH_window_size))
+	FR_fig.suptitle('Average Firing Rate in Bins of {}ms Around Auditory Stimulus ({})'.format(PSTH_window_size, thalamic_activations_filenames[6666]))
 	FR_ax.set_title('(calculated by averaging PSTH turned into FR, for each stimulus time and gid)')
 	FR_ax.legend()
 
@@ -318,7 +336,7 @@ def FR_by_GID(chosen_pop, chosen_cell, stim_times, take_after=50, all_FRs=None, 
 	plt.legend()                                                                                             
 	plt.xlabel('Thalamic Axon GIDs')
 	plt.ylabel('FR (Hz)')                                                   
-	plt.suptitle('Response FR for axons on {}, Sorted by FR (taken {}-{}ms after stimulus)'.format(chosen_cell, stim_to_thal_delay, take_after))              
+	plt.suptitle('Response FR for axons on {}, Sorted by FR (taken {}-{}ms after stimulus); ({})'.format(chosen_cell, stim_to_thal_delay, take_after, thalamic_activations_filenames[6666]))              
 	plt.subplots_adjust(left=0.07,right=0.99,bottom=0.11,top=0.92) 
 	# plt.gca().set_xticklabels(plt.gca().get_xticklabels(), size=5) 
 
@@ -337,7 +355,8 @@ def FR_by_GID(chosen_pop, chosen_cell, stim_times, take_after=50, all_FRs=None, 
 if __name__ == '__main__':
 
 	# stim_times  = pd.read_pickle(stim_times_filename)	
-	stim_times_list = list(range(2000, 154000, 300))# + list(range(2120, 154000, 300))
+	# stim_times_list = sorted(list(range(2000, 154000, 300)) + list(range(2120, 154000, 300)))
+	stim_times_list = list(range(2000, 154000, inter_pair_interval))
 	# stim_times_list = list(range(154000)); np.random.shuffle(stim_times_list); stim_times_list = stim_times_list[:500] # Control- should not give stimulus-like PSTH
 	stim_times = {6666: stim_times_list, 9600: stim_times_list}    
 	
@@ -345,36 +364,33 @@ if __name__ == '__main__':
 
 	plotSpontaneous(thalamic_activations_filenames[6666], [0, 2000])
 
-	start = time()
 	F, (scatter_ax, hist_ax) = plt.subplots(2, 1, gridspec_kw = {'height_ratios':[3, 1]})
 	F.subplots_adjust(hspace=0.34, bottom=0.07, top=0.91) 
 	scatter_ax = plotAxonResponses(locs, responses_dict[6666], color='red', h_ax=scatter_ax)
-	scatter_ax = plotAxonResponses(locs, responses_dict[9600], color='blue', h_ax=scatter_ax)
+	# scatter_ax = plotAxonResponses(locs, responses_dict[9600], color='blue', h_ax=scatter_ax)
 
 	mean_FR_1 = np.mean([responses_dict[f1][axon]['mean_FR'] for axon in responses_dict[6666]])
-	mean_FR_2 = np.mean([responses_dict[f2][axon]['mean_FR'] for axon in responses_dict[9600]])
+	# mean_FR_2 = np.mean([responses_dict[f2][axon]['mean_FR'] for axon in responses_dict[9600]])
 	plot_FreqLoc(scatter_ax, [[f1, 'red'], [f2, 'blue']], min_freq, min_freq_loc)
 
 	hist_ax = plotPSTH(activations_dict, stim_times, h_ax=hist_ax)
 	hist_ax.set_title(scatter_ax.get_title() + ' (With Non-Responsive Axons)')
-	end = time()
-	print('PSTH took {}'.format(end-start))
 
+	plot_cut = False
+	if plot_cut:
+		F_cut, (cut_scatter_ax, cut_hist_ax) = plt.subplots(2, 1, gridspec_kw = {'height_ratios':[3, 1]})
+		F_cut.subplots_adjust(hspace=0.34, bottom=0.07, top=0.91) 
+		cut_responses_dict, cut_gids = removeNonResponsive(responses_dict)
 
+		cut_scatter_ax = plotAxonResponses(locs, cut_responses_dict[6666], color='red', h_ax=cut_scatter_ax)
+		# cut_scatter_ax = plotAxonResponses(locs, cut_responses_dict[9600], color='blue', h_ax=cut_scatter_ax)
 
-	F_cut, (cut_scatter_ax, cut_hist_ax) = plt.subplots(2, 1, gridspec_kw = {'height_ratios':[3, 1]})
-	F_cut.subplots_adjust(hspace=0.34, bottom=0.07, top=0.91) 
-	cut_responses_dict, cut_gids = removeNonResponsive(responses_dict)
+		mean_FR_1 = np.mean([cut_responses_dict[f1][axon]['mean_FR'] for axon in cut_responses_dict[6666]])
+		# mean_FR_2 = np.mean([cut_responses_dict[f2][axon]['mean_FR'] for axon in cut_responses_dict[9600]])
+		plot_FreqLoc(cut_scatter_ax, [[f1, 'red'], [f2, 'blue']], min_freq, min_freq_loc)
+		cut_hist_ax = plotPSTH(activations_dict, stim_times, h_ax=cut_hist_ax)
 
-	cut_scatter_ax = plotAxonResponses(locs, cut_responses_dict[6666], color='red', h_ax=cut_scatter_ax)
-	cut_scatter_ax = plotAxonResponses(locs, cut_responses_dict[9600], color='blue', h_ax=cut_scatter_ax)
-
-	mean_FR_1 = np.mean([cut_responses_dict[f1][axon]['mean_FR'] for axon in cut_responses_dict[6666]])
-	mean_FR_2 = np.mean([cut_responses_dict[f2][axon]['mean_FR'] for axon in cut_responses_dict[9600]])
-	plot_FreqLoc(cut_scatter_ax, [[f1, 'red'], [f2, 'blue']], min_freq, min_freq_loc)
-	cut_hist_ax = plotPSTH(activations_dict, stim_times, h_ax=cut_hist_ax)
-
-	cut_scatter_ax.set_title(cut_scatter_ax.get_title() + ' (Without Non-Responsive Axons)')
+		cut_scatter_ax.set_title(cut_scatter_ax.get_title() + ' (Without Non-Responsive Axons)')
 	# all_FRs, mean_all_FRs_dict = FR_by_GID(Pyr_pop, 'Pyr0', stim_times)
 
 

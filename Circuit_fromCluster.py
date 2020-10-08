@@ -30,12 +30,73 @@ assert os.getcwd().split('/')[-1] == 'Circuit', 'Wrong directory'
 if len(sys.argv)>1:
 	job_id = sys.argv[1]
 else:
-	job_id = '9356587'
+	job_id = input('Job ID? ')
 
 sys.path.append('cluster_downloadables/{}/'.format(job_id))
 exec('from Parameter_Initialization_{} import *'.format(job_id))
 
 # ============================================  Define Functions & Constants  ============================================
+def adjustment_OldInputs():
+	try: thalamic_params 
+	except: 
+		print('No thalamic parameters given! Please input manually')
+		thalamic_params = {
+			'type': input('single or pair? '),
+			'ITI': int(input('ITI? ')),
+			'IPI': int(input('IPI? ')),
+			'freq': input('Frequency? (__Hz or BroadBand): ')
+		}
+
+	try: Pyr_input_params
+	except:
+		print('No Pyramidal input parameters given! Please input manually')
+		Pyr_input_params = {
+			'Dep': int(input('Dep? ')),
+			'Fac': int(input('Fac? ')),
+			'Use': int(input('Use? '))
+		}
+	try: recording_dt
+	except: recording_dt = h.dt
+
+	return thalamic_params, Pyr_input_params, recording_dt
+
+def get_thalamic_input_filename(thalamic_params):
+	fname_check = lambda fname, fchecks: all([f in fname for f in fchecks])
+
+	if thalamic_params['type'] == 'pairs':	
+		path_ = 'thalamocortical_Oren/CreateThalamicInputs/test_times/tone_pairs'	
+		activated_filename = [i for i in os.listdir(path_) if fname_check(i, [thalamic_params['freq'], '.p', 'ITI_%s'%thalamic_params['ITI'], 'IPI_%s'%thalamic_params['IPI']])]
+
+	elif thalamic_params['type'] == 'single':
+		path_ = 'thalamocortical_Oren/CreateThalamicInputs/test_times/single_tone'
+		activated_filename = [i for i in os.listdir(path_) if fname_check(i, [thalamic_params['freq'], '.p', 'IPI_%s'%thalamic_params['IPI']])]
+
+	assert len(activated_filename) == 1, ['Nonspecific thalamic times filename!', pdb.set_trace()] 
+	activated_filename = '{}/{}'.format(path_, activated_filename[0])
+	
+	filenames['thalamic_activations'] = activated_filename
+
+	print('Activating input file: \"{}\"'.format(activated_filename))
+
+	return activated_filename
+
+def get_thalamic_recordings_path(activated_filename):
+	pair_or_single = 	'Pairs'				*('pair' in activated_filename and 'BroadBand' not in activated_filename) + \
+						'Pairs_BroadBand'	*('BroadBand' in activated_filename) + \
+						'Single'			*('single' in activated_filename)
+
+	assert pair_or_single!='', 'Ambiguous thalamic input filename! (pair or single?)'
+
+	thalamic_path = 'thalamic_synapse_recordings/{}/Dep_{}_Fac_{}_Use_{}/ITI_{}_IPI_{}/Pyr_{}_PV_{}_SOM_{}'.format(pair_or_single,
+																					Pyr_input_params['Dep'],
+																					Pyr_input_params['Fac'],
+																					Pyr_input_params['Use'],
+																					thalamic_params['ITI'],
+																					thalamic_params['IPI'],
+																					Pyr_input_weight,
+																					PV_input_weight,
+																					SOM_input_weight)
+	return thalamic_path
 
 def load_Data(job_id, load_path='cluster_downloadables', thalamic_path=''):
 
@@ -45,9 +106,17 @@ def load_Data(job_id, load_path='cluster_downloadables', thalamic_path=''):
 	thalamic_files = os.listdir(thalamic_load_path + '/' + thalamic_path)
 	load_path = load_path + '/{}'.format(job_id)
 	job_files = [i for i in os.listdir(load_path) if i.startswith(job_id)]
-	assert len(job_files)<=3, 'Wrond number of cell files to load'
+	assert len(job_files)<=3, 'Wrong number of cell files to load'
+
+	examp_job = job_files[0]
+	tstop = int((examp_job.split('_tstop_')[1]).split('_')[0])
+	input_filename = examp_job.split(str(tstop)+'_')[1]
+
+	t = np.arange(0, tstop+recording_dt, recording_dt)
+	
 
 	if any([i for i in job_files if 'Pyr' in i]):
+		assert len([i for i in job_files if 'Pyr' in i]) == 1, 'More than one Pyr thalamic recording!'
 		Pyr_data = cPickle.load(open('{}/{}'.format(load_path, [i for i in job_files if 'Pyr' in i][0]), 'rb'))
 		
 		# Old version files of Popuylation dump function
@@ -58,14 +127,19 @@ def load_Data(job_id, load_path='cluster_downloadables', thalamic_path=''):
 				Pyr_data = Pyr_data['cells']
 
 		Pyr_thalamic = cPickle.load(open('{}/{}/{}'.format(thalamic_load_path, thalamic_path, [i for i in thalamic_files if 'Pyr' in i][0]), 'rb'))
-		
+		if 'cells' in Pyr_thalamic:
+			Pyr_thalamic = Pyr_thalamic['cells']
+
 		for Pyr_cell in Pyr_data:
-			Pyr_data[Pyr_cell]['inputs']['g_AMPA'] = Pyr_thalamic['cells'][Pyr_cell]['inputs']['g_AMPA']
-			Pyr_data[Pyr_cell]['inputs']['g_NMDA'] = Pyr_thalamic['cells'][Pyr_cell]['inputs']['g_NMDA']
-			Pyr_data[Pyr_cell]['inputs']['i_AMPA'] = Pyr_thalamic['cells'][Pyr_cell]['inputs']['i_AMPA']
-			Pyr_data[Pyr_cell]['inputs']['i_NMDA'] = Pyr_thalamic['cells'][Pyr_cell]['inputs']['i_NMDA']
+			Pyr_data[Pyr_cell]['inputs']['g_AMPA'] = Pyr_thalamic[Pyr_cell]['inputs']['g_AMPA']
+			Pyr_data[Pyr_cell]['inputs']['g_NMDA'] = Pyr_thalamic[Pyr_cell]['inputs']['g_NMDA']
+			Pyr_data[Pyr_cell]['inputs']['i_AMPA'] = Pyr_thalamic[Pyr_cell]['inputs']['i_AMPA']
+			Pyr_data[Pyr_cell]['inputs']['i_NMDA'] = Pyr_thalamic[Pyr_cell]['inputs']['i_NMDA']
+
+		if len(Pyr_data['Pyr0']['soma_v'])<len(t): t = t[:-1]
 
 	if any([i for i in job_files if 'PV' in i]):
+		assert len([i for i in job_files if 'PV' in i]) == 1, 'More than one PV thalamic recording!'
 		PV_data  = cPickle.load(open('{}/{}'.format(load_path, [i for i in job_files if 'PV' in i][0]), 'rb'))
 
 		# Old version files of Popuylation dump function
@@ -76,15 +150,20 @@ def load_Data(job_id, load_path='cluster_downloadables', thalamic_path=''):
 				PV_data = PV_data['cells']
 
 		PV_thalamic = cPickle.load(open('{}/{}/{}'.format(thalamic_load_path, thalamic_path, [i for i in thalamic_files if 'PV' in i][0]), 'rb'))
+		if 'cells' in PV_thalamic:
+			PV_thalamic = PV_thalamic['cells']
 
 		for PV_cell in PV_data:
-			PV_data[PV_cell]['inputs']['g_AMPA'] = PV_thalamic['cells'][PV_cell]['inputs']['g_AMPA']
-			PV_data[PV_cell]['inputs']['g_NMDA'] = PV_thalamic['cells'][PV_cell]['inputs']['g_NMDA']
-			PV_data[PV_cell]['inputs']['i_AMPA'] = PV_thalamic['cells'][PV_cell]['inputs']['i_AMPA']
-			PV_data[PV_cell]['inputs']['i_NMDA'] = PV_thalamic['cells'][PV_cell]['inputs']['i_NMDA']
+			PV_data[PV_cell]['inputs']['g_AMPA'] = PV_thalamic[PV_cell]['inputs']['g_AMPA']
+			PV_data[PV_cell]['inputs']['g_NMDA'] = PV_thalamic[PV_cell]['inputs']['g_NMDA']
+			PV_data[PV_cell]['inputs']['i_AMPA'] = PV_thalamic[PV_cell]['inputs']['i_AMPA']
+			PV_data[PV_cell]['inputs']['i_NMDA'] = PV_thalamic[PV_cell]['inputs']['i_NMDA']
+
+		if len(PV_data['PV0']['soma_v'])<len(t): t = t[:-1]
 
 
 	if any([i for i in job_files if 'SOM' in i]):
+		assert len([i for i in job_files if 'SOM' in i]) == 1, 'More than one SOM thalamic recording!'
 		SOM_data = cPickle.load(open('{}/{}'.format(load_path, [i for i in job_files if 'SOM' in i][0]), 'rb'))
 
 		# Old version files of Popuylation dump function
@@ -95,22 +174,21 @@ def load_Data(job_id, load_path='cluster_downloadables', thalamic_path=''):
 				SOM_data = SOM_data['cells']
 
 		SOM_thalamic = cPickle.load(open('{}/{}/{}'.format(thalamic_load_path, thalamic_path, [i for i in thalamic_files if 'SOM' in i][0]), 'rb'))
+		if 'cells' in SOM_thalamic:
+			SOM_thalamic = SOM_thalamic['cells']
 		
 		for SOM_cell in SOM_data:
-			SOM_data[SOM_cell]['inputs']['g_AMPA'] = SOM_thalamic['cells'][SOM_cell]['inputs']['g_AMPA']
-			SOM_data[SOM_cell]['inputs']['g_NMDA'] = SOM_thalamic['cells'][SOM_cell]['inputs']['g_NMDA']
-			SOM_data[SOM_cell]['inputs']['i_AMPA'] = SOM_thalamic['cells'][SOM_cell]['inputs']['i_AMPA']
-			SOM_data[SOM_cell]['inputs']['i_NMDA'] = SOM_thalamic['cells'][SOM_cell]['inputs']['i_NMDA']
+			SOM_data[SOM_cell]['inputs']['g_AMPA'] = SOM_thalamic[SOM_cell]['inputs']['g_AMPA']
+			SOM_data[SOM_cell]['inputs']['g_NMDA'] = SOM_thalamic[SOM_cell]['inputs']['g_NMDA']
+			SOM_data[SOM_cell]['inputs']['i_AMPA'] = SOM_thalamic[SOM_cell]['inputs']['i_AMPA']
+			SOM_data[SOM_cell]['inputs']['i_NMDA'] = SOM_thalamic[SOM_cell]['inputs']['i_NMDA']
+
+		if len(SOM_data['SOM0']['soma_v'])<len(t): t = t[:-1]
 
 	if record_channel:
 		axon_gsk = cPickle.load(open('{}/{}'.format(load_path, 'axon_sk.p'), 'rb'))
 		soma_gsk = cPickle.load(open('{}/{}'.format(load_path, 'somatic_sk.p'), 'rb'))
 
-	examp_job = job_files[0]
-	tstop = int((examp_job.split('_tstop_')[1]).split('_')[0])
-	input_filename = examp_job.split(str(tstop)+'_')[1]
-
-	t = np.arange(0, tstop+h.dt, h.dt)
 
 	return t, Pyr_data, PV_data, SOM_data, tstop, input_filename, axon_gsk, soma_gsk
 
@@ -130,12 +208,18 @@ def get_GIDs(upload_from):
 	return chosen_GIDs, chosen_PV_n_contacts, thalamic_GIDs
 
 # ============================================  Load Data from Cluster Dumps  ============================================
-t, Pyr_data, PV_data, SOM_data, tstop, input_filename, axon_gsk, soma_gsk = load_Data(job_id, thalamic_path='thalamic_synapse_recordings/Pyr_0.5_PV_0.4_SOM_0.4')
+
+thalamic_params, Pyr_input_params, recording_dt = adjustment_OldInputs()
+activated_filename 	= get_thalamic_input_filename(thalamic_params)
+thalamic_path 		= get_thalamic_recordings_path(activated_filename)
+
+t, Pyr_data, PV_data, SOM_data, tstop, input_filename, axon_gsk, soma_gsk = load_Data(job_id, thalamic_path=thalamic_path)
 
 stand_freq = freq1*(str(freq1) in input_filename) + freq2*(str(freq2) in input_filename)
 dev_freq = freq1*(str(freq1) not in input_filename) + freq2*(str(freq2) not in input_filename)
 
-stim_times = cPickle.load(open(filenames['stim_times'], 'rb'))[stand_freq]
+# stim_times = cPickle.load(open(filenames['stim_times'], 'rb'))[stand_freq]
+stim_times = [[i, stand_freq] for i in range(2000, tstop, thalamic_params['IPI'])]
 stim_times_standard = [i[0] for i in stim_times if i[1]==stand_freq]
 stim_times_deviant = [i[0] for i in stim_times if i[1]==dev_freq]
 stim_times = [i for i in stim_times if i[0]<=tstop]
@@ -145,33 +229,25 @@ print('\n========== Choosing GIDs from BlueBrain Database (pyramidal between {}H
 upload_from = 'GIDs_instantiations/pyr_72851_between_6666_9600'
 chosen_GIDs, chosen_PV_n_contacts, thalamic_GIDs = get_GIDs(upload_from)
 
-# ==============================================  Stimulus Analysis  ==============================================
-# stimuli[stand_freq] = Stimulus(stand_freq, dev_freq, filenames['stim_times'], filenames['thalamic_activations_6666'], axon_gids=[i[0] for i in thalamic_GIDs['to_pyr']])
-
-run_plot_function = False
-if run_plot_function:
-	stimuli[dev_freq] = Stimulus(dev_freq, stand_freq, filenames['stim_times'], filenames['thalamic_activations_9600'], axon_gids=[i[0] for i in thalamic_GIDs['to_pyr']])
-	stim_ax = plotThalamicResponses(stimuli, stand_freq, dev_freq, thalamic_locations, run_function=True)
-
 # ============================================== Plot example responses ==============================================
 if PV_data:
-	Wehr_Zador_fromData(job_id, PV_data, 'PV0', stim_times, dt=h.dt, tstop=tstop, t=t, exc_weight=PV_input_weight, standard_freq=stand_freq, spike_threshold=spike_threshold)
+	Wehr_Zador_fromData(job_id, PV_data, 'PV0', stim_times, take_after=300, dt=recording_dt, tstop=tstop, t=t, exc_weight=PV_input_weight, standard_freq=stand_freq, spike_threshold=spike_threshold)
 if Pyr_data:
-	Wehr_Zador_fromData(job_id, Pyr_data, 'Pyr0', stim_times, dt=h.dt, tstop=tstop, t=t, exc_weight=Pyr_input_weight, standard_freq=stand_freq, spike_threshold=spike_threshold)
+	Wehr_Zador_fromData(job_id, Pyr_data, 'Pyr0', stim_times, stim_params={'type':thalamic_params['type'], 'ITI':thalamic_params['ITI'], 'mark_second': True}, take_after=300, dt=recording_dt, tstop=tstop, t=t, exc_weight=Pyr_input_weight, standard_freq=stand_freq, spike_threshold=spike_threshold)
 if SOM_data:
-	Wehr_Zador_fromData(job_id, SOM_data, 'SOM0', stim_times, dt=h.dt, tstop=tstop, t=t, exc_weight=SOM_input_weight, standard_freq=stand_freq, spike_threshold=spike_threshold)
+	Wehr_Zador_fromData(job_id, SOM_data, 'SOM0', stim_times, take_after=300, dt=recording_dt, tstop=tstop, t=t, exc_weight=SOM_input_weight, standard_freq=stand_freq, spike_threshold=spike_threshold)
 		
 
 FR_ax = None
-# C = iter(['skyblue', 'orange', 'crimson'])
-C = iter(['xkcd:fuchsia', 'xkcd:azure', 'grey'])
+C = iter(['skyblue', 'orange', 'crimson'])
+# C = iter(['xkcd:fuchsia', 'xkcd:azure', 'grey'])
 for data in [PV_data, SOM_data, Pyr_data]:
 	if data:
 		temp_cell = list(data.keys())[0]
 		soma_v = data[temp_cell]['soma_v']
 		temp_which_cell = temp_cell.split([i for i in temp_cell if i.isdigit()][0])[0]
 		
-		FR_ax = plotFRs(job_id, [i[0] for i in stim_times], soma_v, t, tstop=tstop, window=15, which_cell=temp_which_cell, axes_h=FR_ax, color=next(C))
+		FR_ax = plotFRs(job_id, [i[0] for i in stim_times], soma_v, t, take_after=300, tstop=tstop, window=6, which_cell=temp_which_cell, axes_h=FR_ax, color=next(C))
 
 somas_dict = {}
 for n, d in [['Pyr0', Pyr_data], ['PV0', PV_data], ['SOM0', SOM_data]]:
@@ -275,13 +351,13 @@ def plot_SplitInhConductance(pre_data, pre_cell, post_datas, post_cells, stim_ti
 
 	return split_inputs_dict
 
-if 'g_GABA' in PV_data['PV0']['inputs']:
-	if any([hasattr(i, '__len__') for i in PV_data['PV0']['inputs']['g_GABA'].values()]):
-		split_inputs_dict = plot_SplitInhConductance(SOM_data, 'SOM0', [PV_data], ['PV0'], stim_times, which_success='Presynaptic', window=[0, SOM_input_delay+40], pre_input_delay=SOM_input_delay)
+# if 'g_GABA' in PV_data['PV0']['inputs']:
+# 	if any([hasattr(i, '__len__') for i in PV_data['PV0']['inputs']['g_GABA'].values()]):
+# 		split_inputs_dict = plot_SplitInhConductance(SOM_data, 'SOM0', [PV_data], ['PV0'], stim_times, which_success='Presynaptic', window=[0, SOM_input_delay+40], pre_input_delay=SOM_input_delay)
 
-if 'g_GABA' in Pyr_data['Pyr0']['inputs']:
-	if any([hasattr(i, '__len__') for i in Pyr_data['Pyr0']['inputs']['g_GABA'].values()]):
-		split_inputs_dict = plot_SplitInhConductance(PV_data, 'PV0', [Pyr_data], ['Pyr0'], stim_times, which_success='Postsynaptic', window=[0, PV_input_delay+40], pre_input_delay=PV_input_delay)
+# if 'g_GABA' in Pyr_data['Pyr0']['inputs']:
+# 	if any([hasattr(i, '__len__') for i in Pyr_data['Pyr0']['inputs']['g_GABA'].values()]):
+# 		split_inputs_dict = plot_SplitInhConductance(PV_data, 'PV0', [Pyr_data], ['Pyr0'], stim_times, which_success='Postsynaptic', window=[0, PV_input_delay+40], pre_input_delay=PV_input_delay)
 
 if record_channel:
 

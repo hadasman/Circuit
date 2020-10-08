@@ -18,7 +18,7 @@ def plotThalamicResponses(stimuli, freq1, freq2, thalamic_locations, run_functio
 
 		return stim_ax
 
-def Wehr_Zador(population, cell_name, stimuli, title_, exc_weight=0, inh_weight=0, standard_freq=None, input_pop_outputs=None, take_before=20, take_after=155, tstop=None, spike_threshold=None, dt=0.025, t=None):
+def Wehr_Zador(population, cell_name, stimulus, title_, exc_weight=0, inh_weight=0, standard_freq=None, input_pop_outputs=None, take_before=20, take_after=155, tstop=None, spike_threshold=None, dt=0.025, t=None):
 
 	def plot_traces(h_ax, all_means, which_traces='Currents', units_='nA'):
 
@@ -32,7 +32,7 @@ def Wehr_Zador(population, cell_name, stimuli, title_, exc_weight=0, inh_weight=
 		AMPA = [i*unit_conversion for i in all_means['%s_AMPA'%which_plot]]
 		NMDA = [i*unit_conversion for i in all_means['%s_NMDA'%which_plot]]			
 
-		h_ax.axvline(take_before, LineStyle='--', color='gray')
+		h_ax.axvline(0, LineStyle='--', color='gray')
 		h_ax.plot(t_vec, [AMPA[i]+NMDA[i] for i in range(n_points)], 'purple', label='%s$_{AMPA}$ + %s$_{NMDA}$'%(which_plot, which_plot))
 
 		if input_pop_outputs:
@@ -44,15 +44,14 @@ def Wehr_Zador(population, cell_name, stimuli, title_, exc_weight=0, inh_weight=
 		h_ax.legend()
 		h_ax.set_title('Mean Synaptic %s'%which_traces)
 		h_ax.set_ylabel('%s (%s)'%(which_plot.upper(), units_))
-		h_ax.set_xlim([0, take_before+take_after])
+		h_ax.set_xlim([-take_before, take_after])
 
 	if not population:
 		return
 
 	fig, axes = plt.subplots(3, 1)
 	fig.subplots_adjust(hspace=0.34, bottom=0.08, top=0.9) 
-	times = [i[0] for i in stimuli[standard_freq].stim_times_all]
-	times = [i for i in times if i<tstop]
+	times = [i for i in stimulus.stim_times_all if i<tstop]
 
 	cut_vec = lambda vec, start_idx, end_idx: [vec[i] for i in range(start_idx, end_idx)]
 	
@@ -66,8 +65,11 @@ def Wehr_Zador(population, cell_name, stimuli, title_, exc_weight=0, inh_weight=
 		idx1 = int((T-take_before)/dt)
 		idx2 = int((T+take_after)/dt)
 
+		if idx2>len(t):
+			break
+
 		t_vec = cut_vec(t, idx1, idx2)
-		t_vec = [i-t_vec[0] for i in t_vec]
+		t_vec = [i-t_vec[0]-take_before for i in t_vec]
 		v_vec = cut_vec(population.cells[cell_name]['soma_v'], idx1, idx2)
 		if any([i>=spike_threshold for i in v_vec]):
 			spike_count += 1
@@ -91,23 +93,32 @@ def Wehr_Zador(population, cell_name, stimuli, title_, exc_weight=0, inh_weight=
 		for i in all_sums:
 			all_means[i].append(np.sum(all_sums[i], axis=0))
 
-		axes[0].plot(t_vec, v_vec, 'k', LineWidth=0.7)
 
 		if T==times[0]:
 			axes[0].legend(['%s soma v'%cell_name], loc='upper right')
 
+
+		detect_spike = lambda vec: [i for i in range(1, len(vec)-1) if (vec[i]>vec[i-1]) and (vec[i]>vec[i+1]) and (vec[i]>spike_threshold)]
+		
+		idx_spont = int((take_before+30)/dt)
+		idx_start_stim = int((take_before)/dt)
+		if any(detect_spike(v_vec[idx_spont:])) and not any(detect_spike(v_vec[idx_start_stim:idx_spont])):
+			soma_plot_color = 'r'
+		else:
+			soma_plot_color = 'k'
+		axes[0].plot(t_vec, v_vec, color=soma_plot_color, LineWidth=0.7)
+
 	# Average over time points
 	for i in all_means:
 		all_means[i] = np.mean(all_means[i][:-1], axis=0)
-
 	t_vec = [i*dt for i in range(0, len(all_means['i_AMPA']))]
 	n_points = len(t_vec)
 
 	plt.suptitle('{} (GID: {}) Cell ({} spikes out of {})'.format(title_, population.name_to_gid[cell_name], spike_count, len(times)))
-	axes[0].axvline(take_before, LineStyle='--', color='gray')
+	axes[0].axvline(0, LineStyle='--', color='gray')
 	axes[0].set_title('Overlay of Somatic Responses to %sHz Simulus (locked to stimulus presentation)'%standard_freq)
 	axes[0].set_ylabel('V (mV)')
-	axes[0].set_xlim([0, take_before+take_after])
+	axes[0].set_xlim([-take_before, take_after])
 	
 	# ========== Plot Currents ==========
 	plot_traces(axes[1], all_means, which_traces='Currents', units_='nA')
@@ -288,7 +299,7 @@ def plotFRs(job_id, stim_times, soma_v, t, tstop=0, window=0, take_before=150, t
 
 
 
-def Wehr_Zador_fromData(job_id, data, cell_name, stim_times, exc_weight=0, inh_weight=0, standard_freq=6666, take_before=20, take_after=155, tstop=None, spike_threshold=0, dt=0.025, t=None):
+def Wehr_Zador_fromData(job_id, data, cell_name, stim_times, exc_weight=0, inh_weight=0, standard_freq=6666, take_before=20, take_after=155, tstop=None, spike_threshold=0, dt=0.025, t=None, stim_params={'type':None, 'ITI':None, 'mark_second':False}):
 
 	def getData(data, cell_name):
 		g_AMPA = data[cell_name]['inputs']['g_AMPA']
@@ -325,17 +336,23 @@ def Wehr_Zador_fromData(job_id, data, cell_name, stim_times, exc_weight=0, inh_w
 		if which_traces == 'Currents':
 			which_plot = 'i'
 			unit_conversion = 1
+			MAXs = max_i_AMPA + max_i_NMDA
+			MINs = min_i_AMPA + min_i_NMDA
 		elif which_traces == 'Conductances':
 			which_plot = 'g'
 			unit_conversion = 1000
+			MAXs = max_g_AMPA + max_g_NMDA
+			MINs = min_g_AMPA + min_g_NMDA
+
 
 		AMPA = [i*unit_conversion for i in all_means['%s_AMPA'%which_plot]]
 		NMDA = [i*unit_conversion for i in all_means['%s_NMDA'%which_plot]]			
 
-		h_ax.axvline(take_before, LineStyle='--', color='gray')
+		minimize = lambda L: [L[i] for i in range(len(L)) if i%2==0]
+
+		h_ax.axvline(0, LineStyle='--', color='gray')
 		h_ax.plot(t_vec, [AMPA[i]+NMDA[i] for i in range(n_points)], 'purple', label='%s$_{AMPA}$ + %s$_{NMDA}$'%(which_plot, which_plot))
-		# h_ax.plot(t_vec, AMPA, 'purple', label='AMPA', alpha=0.5)
-		# h_ax.plot(t_vec, NMDA, 'purple', label='NMDA', alpha=0.3)
+
 		if 'g_GABA' in all_means:
 			GABA = {}
 
@@ -347,15 +364,12 @@ def Wehr_Zador_fromData(job_id, data, cell_name, stim_times, exc_weight=0, inh_w
 				alpha_ = 0.5
 
 			GABA_tot = np.sum([GABA[i] for i in GABA], axis=0)
-			# h_ax.plot(t_vec, GABA, 'b', label='%s$_{GABA}$'%which_plot)
-			# h_ax.plot(t_vec, [GABA[i]+AMPA[i]+NMDA[i] for i in range(n_points)], label='%s$_{tot}$'%which_plot)
-			h_ax.plot(t_vec, [GABA_tot[i]+AMPA[i]+NMDA[i] for i in range(n_points)], label='%s$_{tot}$'%which_plot)
-			
+			h_ax.plot(t_vec, [GABA_tot[i]+AMPA[i]+NMDA[i] for i in range(n_points)], label='%s$_{tot}$'%which_plot)			
 
-		h_ax.legend()
+		h_ax.legend(loc='upper right')
 		h_ax.set_title('Mean Synaptic %s'%which_traces)
 		h_ax.set_ylabel('%s (%s)'%(which_plot.upper(), units_))
-		h_ax.set_xlim([0, take_before+take_after])
+		h_ax.set_xlim([-take_before, take_after])
 
 	fig, axes = plt.subplots(3, 1, figsize=(9, 7.5))
 	fig.subplots_adjust(hspace=0.34, bottom=0.08, top=0.9) 
@@ -383,10 +397,10 @@ def Wehr_Zador_fromData(job_id, data, cell_name, stim_times, exc_weight=0, inh_w
 		
 		idx1 = int((T-take_before)/dt)
 		idx2 = int((T+take_after)/dt)
-
+		
 		t_vec = cut_vec(t, idx1, idx2)
 
-		t_vec = [i-t_vec[0] for i in t_vec]
+		t_vec = [i-t_vec[0]-take_before for i in t_vec]
 		v_vec = cut_vec(soma_v, idx1, idx2)
 		if any([i>=spike_threshold for i in v_vec]):
 			spike_count += 1
@@ -402,11 +416,46 @@ def Wehr_Zador_fromData(job_id, data, cell_name, stim_times, exc_weight=0, inh_w
 				all_means['i_GABA'][pre_cell].append(cut_vec(i_GABA[pre_cell], idx1, idx2))
 
 
-		axes[0].plot(t_vec, v_vec, 'k', LineWidth=0.7)
-		if T==times[0]:
-			axes[0].legend(['%s soma v'%cell_name], loc='upper right')
+		soma_plot_color = 'k'
+		if stim_params['mark_second']:
+			detect_spike = lambda vec: [i for i in range(1, len(vec)-1) if (vec[i]>vec[i-1]) and (vec[i]>vec[i+1]) and (vec[i]>spike_threshold)]
 
+			if stim_params['type']=='pairs':
+				try: axes[0].axvline(stim_params['ITI'], color='gray', LineStyle='--', LineWidth=0.7)
+				except: print('In Wehr_Zador_fromData(): not marking 2nd stimulus on plot because no ITI given to function')
+
+				idx_first_stim = int((take_before)/dt)
+				idx_end_first_stim = int((take_before+50)/dt)
+				idx_second_stim = int((take_before+stim_params['ITI'])/dt)
+				idx_end_second_stim = int((take_before+stim_params['ITI']+50)/dt)
+				if any(detect_spike(v_vec[idx_second_stim:idx_end_second_stim])):
+					if any(detect_spike(v_vec[idx_first_stim:idx_end_first_stim])):
+						soma_plot_color = 'r'
+					else:
+						soma_plot_color = 'g'
+
+			elif stim_params['type']=='single':
+
+				late_start = int((take_before+40)/dt)
+				late_end = int((take_before+100)/dt)
+				stim_end = int((take_before+30)/dt)
+				stim_start = int(take_before/dt)
+				if any(detect_spike(v_vec[late_start:late_end])) and not any(detect_spike(v_vec[stim_start:stim_end])):
+					soma_plot_color = 'r'			
+				elif any(detect_spike(v_vec[late_start:late_end])) and any(detect_spike(v_vec[stim_start:stim_end])):
+					soma_plot_color = 'k'
+				elif not any(detect_spike(v_vec[late_start:late_end])) and any(detect_spike(v_vec[stim_start:stim_end])):
+					soma_plot_color = 'g'
+				else:
+					soma_plot_color = 'orange'
+		axes[0].plot(t_vec, v_vec, color=soma_plot_color, LineWidth=0.7)
+				
 	# Average over time points
+	max_g_AMPA = np.max(all_means['g_AMPA'][:-1], axis=0); min_g_AMPA = np.min(all_means['g_AMPA'][:-1], axis=0)
+	max_g_NMDA = np.max(all_means['g_NMDA'][:-1], axis=0); min_g_NMDA = np.min(all_means['g_NMDA'][:-1], axis=0)
+	max_i_AMPA = np.max(all_means['i_AMPA'][:-1], axis=0); min_i_AMPA = np.min(all_means['i_AMPA'][:-1], axis=0)
+	max_i_NMDA = np.max(all_means['i_NMDA'][:-1], axis=0); min_i_NMDA = np.min(all_means['i_NMDA'][:-1], axis=0)
+
 	for i in all_means:		
 		if 'GABA' in i:
 			for j in all_means[i]:
@@ -414,15 +463,20 @@ def Wehr_Zador_fromData(job_id, data, cell_name, stim_times, exc_weight=0, inh_w
 		else:
 			all_means[i] = np.mean(all_means[i][:-1], axis=0)
 
-	t_vec_tot = [i*dt for i in range(0, len(all_means['i_AMPA']))]
+	t_vec_tot = [(i*dt)-take_before for i in range(0, len(all_means['i_AMPA']))]	
 	n_points = len(t_vec_tot)
 
 	title_ = cell_name.split([i for i in cell_name if i.isdigit()][0])[0]
 	plt.suptitle('{} (GID: {}) Cell ({} spikes out of {}), Job {}'.format(title_, gid, spike_count, len(times), job_id))
-	axes[0].axvline(take_before, LineStyle='--', color='gray')
+	axes[0].axvline(0, LineStyle='--', color='gray')
 	axes[0].set_title('Overlay of Somatic Responses to %sHz Simulus (locked to stimulus presentation)'%standard_freq)
 	axes[0].set_ylabel('V (mV)')
-	axes[0].set_xlim([0, take_before+take_after])
+	axes[0].set_xlim([-take_before, take_after])
+	axes[0].plot(0, 0, 'r', label='Spike only late')
+	axes[0].plot(0, 0, 'k', label='Both evoked and late spike')
+	axes[0].plot(0, 0, 'g', label='Spike only evoked')
+	axes[0].plot(0, 0, 'orange', label='No spikes')
+	axes[0].legend()
 	
 	# ========== Plot Currents ==========
 	plot_traces(t_vec_tot, n_points, axes[1], all_means, which_traces='Currents', units_='nA')

@@ -9,11 +9,9 @@ import pandas as pd
 from neuron import h, gui
 os.chdir('../Circuit')
 
-from tkinter import messagebox
-
 class Population():
 
-	def __init__(self, population_name, morph_path, template_path, template_name, verbose=False):
+	def __init__(self, population_name, morph_path, template_path, template_name, verbose=False, recording_dt=h.dt):
 
 		self.cells 				= {}
 		self.population_name 	= population_name
@@ -25,6 +23,7 @@ class Population():
 		self.cell_inputs		= {}
 		self.outputs 			= {}
 		self.name_to_gid 		= {}
+		self.recording_dt 		= recording_dt
 		self.loadTemplate()
 		
 		exec("self.template = h.%s"%template_name)
@@ -44,7 +43,7 @@ class Population():
 		os.chdir(self.template_path)
 
 		h.load_file("stdrun.hoc")
-		print('- Loading constants')		
+		if self.verbose: print('- Loading constants')		
 		h.load_file('import3d.hoc')
 
 		constants_loaded = h.load_file('constants.hoc')
@@ -58,6 +57,7 @@ class Population():
 		if not morphology_loaded:
 			print('WARNING: {} hoc file not loaded! Did you create it and call it by the correct name?'.format(morphology))
 		if not biophysics_loaded:
+			# pdb.set_trace()
 			print('WARNING: {} hoc file not loaded! Did you create it and call it by the correct name?'.format(biophysics))
 
 
@@ -88,7 +88,7 @@ class Population():
 		self.cells[cell_name]['cell'] = self.template(add_synapses)
 
 		self.cells[cell_name]['soma_v'] = h.Vector()
-		self.cells[cell_name]['soma_v'].record(self.cells[cell_name]['cell'].soma[0](0.5)._ref_v)
+		self.cells[cell_name]['soma_v'].record(self.cells[cell_name]['cell'].soma[0](0.5)._ref_v, self.recording_dt)
 
 		self.cells[cell_name]['soma'] 				= self.cells[cell_name]['cell'].soma[0]
 		self.cells[cell_name]['axons'] 				= [i for i in self.cells[cell_name]['cell'].axon]
@@ -105,7 +105,7 @@ class Population():
 		# Return to original dir
 		os.chdir(original_path)
 
-	def connectCells(self, post_cell_name, pre_pop, pre_cell_name, post_branches, syn_specs, input_source='voltage', weight=0.5, delay=0, threshold=0, record_syns=False):
+	def connectCells(self, post_cell_name, pre_pop, pre_cell_name, post_branches, syn_specs, input_source='voltage', weight=0.5, delay=0, threshold=0, record_syns=False, std_params={'Dep':0, 'Fac':0, 'Use':0.25}):
 		# ** self if post_pop ** 
 		def get_synLocations(post_branches, syn_specs):
 
@@ -175,9 +175,14 @@ class Population():
 
 				return syn_locs_dict
 
-			if len(syn_specs) == 2:
-				dist   = syn_specs[0] 
-				n_syns = syn_specs[1]
+			if type(syn_specs) != str:
+				if type(syn_specs) == dict:
+					dist   = syn_specs[pre_cell_name][0]
+					n_syns = syn_specs[pre_cell_name][1]
+				else:
+					dist   = syn_specs[0] 
+					n_syns = syn_specs[1]
+				
 				locs_dict = calc_synLocations(post_branches, n_syns, dist)
 				assert np.sum([len(locs_dict[b]['locs']) for b in locs_dict])==n_syns, 'length of locs is not n_syns'
 
@@ -190,7 +195,7 @@ class Population():
 
 			return locs_dict
 
-		def addInhSynapses(input_source, locs, branch, output_dict, pre_branches, delay=delay, weight=weight, threshold=threshold, Dep=0, Fac=0):
+		def addInhSynapses(input_source, locs, branch, output_dict, pre_branches, std_params, delay=delay, weight=weight, threshold=threshold):
 			'''locs and preysnaptics should be arrays ordered identically, for synapse location on postsynaptic branch (locs) and
 			presynaptic partner (presynaptics)
 			Inputs:
@@ -209,15 +214,15 @@ class Population():
 
 			for i in range(len(locs)):
 				synapses.append(h.ProbUDFsyn2_lark(locs[i], sec = branch))
-				conductances.append(h.Vector().record(synapses[-1]._ref_g))
-				currents.append(h.Vector().record(synapses[-1]._ref_i))
+				conductances.append(h.Vector().record(synapses[-1]._ref_g, self.recording_dt))
+				currents.append(h.Vector().record(synapses[-1]._ref_i, self.recording_dt))
 
 				synapses[-1].tau_r 	= 0.18
 				synapses[-1].tau_d 	= 5
 				synapses[-1].e 		= -80
-				synapses[-1].Dep 	= Dep # Put depression on PV -> pyr synapses
-				synapses[-1].Fac 	= Fac
-				synapses[-1].Use 	= 0.25
+				synapses[-1].Dep 	= std_params['Dep'] # Put depression on PV -> pyr synapses
+				synapses[-1].Fac 	= std_params['Fac']
+				synapses[-1].Use 	= std_params['Use']
 				synapses[-1].u0 	= 0
 				synapses[-1].gmax 	= 0.001 # don't touch - weight conversion factor to (us) (later multiplied by the conductance in nS)
 
@@ -256,7 +261,7 @@ class Population():
 			post_branch_obj = locs_dict[post_branch]['branch_obj']
 			locs            = locs_dict[post_branch]['locs']
 			
-			self.cell_inputs[post_cell_name][pre_cell_name] = addInhSynapses(input_source, locs, post_branch_obj, self.cell_inputs[post_cell_name][pre_cell_name], pre_branches, Dep=0)
+			self.cell_inputs[post_cell_name][pre_cell_name] = addInhSynapses(input_source, locs, post_branch_obj, self.cell_inputs[post_cell_name][pre_cell_name], pre_branches, std_params)
 			self.cell_inputs[post_cell_name][pre_cell_name]['locs'] = self.cell_inputs[post_cell_name][pre_cell_name]['locs'] + [[post_branch, l] for l in locs]
 
 		flatten = lambda L: [j for i in L for j in i]
@@ -267,7 +272,7 @@ class Population():
 			self.cell_inputs[post_cell_name][pre_cell_name]['g_GABA'] = flatten(self.cell_inputs[post_cell_name][pre_cell_name]['g_GABA'])
 			self.cell_inputs[post_cell_name][pre_cell_name]['i_GABA'] = flatten(self.cell_inputs[post_cell_name][pre_cell_name]['i_GABA'])
 
-	def addInput(self, cell_name, thalamic_activations_filename = '', connecting_gids=[], weight=0.4, axon_gids=None, where_synapses=[], record_syns=False, delay=0):
+	def addInput(self, cell_name, thalamic_activations_filename = '', connecting_gids=[], weight=0.4, axon_gids=None, where_synapses=[], record_syns=False, delay=0, std_params={'Dep':0, 'Fac':0, 'Use':1}):
 
 		def checkValidFilename(filename, cond='', which_standard=None):	
 			ok = 0	
@@ -343,7 +348,7 @@ class Population():
 
 			return syn_locs_dict
 				
-		def addExcSynapses(contact_locs_dict, stim_times, weight=weight, Dep=0, Fac=0, delay=0):
+		def addExcSynapses(contact_locs_dict, stim_times, std_params, weight=weight, delay=0):
 			# contact_locs_dict = {branch_name: {'locs': [locs], 'branch_obj': branch_obj}}			
 
 			synapses, netcons, g_AMPA, g_NMDA, i_AMPA, i_NMDA = [], [], [], [], [], []
@@ -354,12 +359,19 @@ class Population():
 				
 				for loc in contact_locs_dict[branch_name]['locs']: 
 					synapses.append(h.ProbAMPANMDA_EMS(loc, sec=branch))
-					synapses[-1].Dep = Dep
-					synapses[-1].Fac = Fac
-					g_AMPA.append(h.Vector().record(synapses[-1]._ref_g_AMPA))
-					g_NMDA.append(h.Vector().record(synapses[-1]._ref_g_NMDA))
-					i_AMPA.append(h.Vector().record(synapses[-1]._ref_i_AMPA))
-					i_NMDA.append(h.Vector().record(synapses[-1]._ref_i_NMDA))
+					if np.random.rand()>-1:
+						synapses[-1].Dep = std_params['Dep']
+						synapses[-1].Fac = std_params['Fac']
+						synapses[-1].Use = std_params['Use']
+					else:
+						synapses[-1].Dep = 0
+						synapses[-1].Fac = 0
+						synapses[-1].Use = 1
+						pdb.set_trace()
+					g_AMPA.append(h.Vector().record(synapses[-1]._ref_g_AMPA, self.recording_dt))
+					g_NMDA.append(h.Vector().record(synapses[-1]._ref_g_NMDA, self.recording_dt))
+					i_AMPA.append(h.Vector().record(synapses[-1]._ref_i_AMPA, self.recording_dt))
+					i_NMDA.append(h.Vector().record(synapses[-1]._ref_i_NMDA, self.recording_dt))
 
 			# NetCon: "The source may be a NULLObject. In this case events can only occur by calling event() from hoc"
 			for syn in synapses:
@@ -405,7 +417,7 @@ class Population():
 				contact_locs_dict = calc_synLocationsAll(branches, n_syns)
 
 			temp_synapses, temp_netcons, temp_g_AMPA, temp_g_NMDA, temp_i_AMPA, temp_i_NMDA = addExcSynapses(contact_locs_dict, stim_times,  																							 
-																						   Dep=0, Fac=0)				
+																						   std_params, weight=weight)				
 
 			self.inputs[cell_name]['thalamic_gid_{}'.format(thal_gid)] = {}
 			self.inputs[cell_name]['thalamic_gid_{}'.format(thal_gid)]['synapses']   = temp_synapses
@@ -548,10 +560,6 @@ class Population():
 				filename = chooseFilename()
 				cPickle.dump(self, open(path + '/' + filename, 'wb'))
 		print('Dictionary with {} soma voltages saved to {}'.format(self.population_name, filename))
-
-
-
-
 
 
 
