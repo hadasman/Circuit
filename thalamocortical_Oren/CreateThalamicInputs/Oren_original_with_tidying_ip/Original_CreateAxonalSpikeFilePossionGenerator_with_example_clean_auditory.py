@@ -298,7 +298,7 @@ if __name__ == '__main__' :
     stim_order = run_experiment(9600, 6666, 109680, 'input9600_109680_3.dat')
     stim_times[9600] = [[times[i], stim_order[i]] for i in range(len(stim_order))]
 
-    cPickle.dump(stim_times, open(save_path + '/stim_times.p'))
+    cPickle.dump(stim_times, open(save_path + '/stim_times.p', 'wb'))
 
 
 
