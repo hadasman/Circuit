@@ -15,6 +15,8 @@ import _pickle as cPickle
 from worker_functions import *
 from SSA_Stim import *
 
+flatten = lambda L: [j for i in L for j in i]
+
 def CreatseExpDict():
     #Read Data from fit!
     amp_to_dist_vals = {60: {'tun_width_dist': 'exp', 
@@ -35,13 +37,16 @@ def CreatseExpDict():
 
     amp = 60
     experiment = {
-                  'SSAType': 'StandardDeviant',
-                  'BroadBand': False,
+                  'SSAType': 'BroadBand_pair',
+                  'BroadBand': False, 
+                  'first_marker_duration': 120,
+                  'first_marker_minimal_FR': 40,    
+                  'inter_tone_interval': 140, # marker onset-to-onset     
 
                   'axons_settings': [AxoGidToXY],
                   'prefered_frequency_distribution': 'tonotopic',
                   'prefered_frequency_distribution_shuffle_percent': 0,
-                  'ssa_presentations': 500,
+                  'ssa_presentations': 250,
                   'ssa_standard_probability': 0.95,
                   'ssa_presentations_seed': 1,
                   'prefered_frequency_boundaries': [4000, 16000], # 2 octvaes
@@ -141,7 +146,7 @@ def worker_job(gid_seed):
     
     return(axon_gid, axon_activity_vars)
 
-def create_axons_spikes(seed, experiment, save_path=None, save_name=None):
+def create_axons_spikes(stand_freq, seed, experiment, save_path=None, save_name=None):
     '''
     save_path should be the link to the spike file to which you want to write the spike_times
     '''
@@ -160,11 +165,10 @@ def create_axons_spikes(seed, experiment, save_path=None, save_name=None):
     for i in list(tqdm(pool.imap(worker_job, data_to_send), total=len(data_to_send))):
         axon_activity_vars[i[0]] = i[1][i[0]]
     
-
     if save_path:
         assert save_name
         print(save_path)
-        dat_filename = save_path +'/' + save_name
+        dat_filename = save_path +'/' + save_name + '.dat'
         f = open(dat_filename,'w')
         f.write('/scatter\n')
         sps = [zip(*[axon_activity_vars[axon_gid]['spike_times'],[axon_gid]*len(axon_activity_vars[axon_gid]['spike_times'])]) for axon_gid in axon_activity_vars]
@@ -188,16 +192,23 @@ def create_axons_spikes(seed, experiment, save_path=None, save_name=None):
             else: 
                 activations[axon] = [time] 
 
-        # filename = dat_filename.split('.')[0]
-        # pic_filename =  filename + '.p'
-        # cPickle.dump(activations, open(pic_filename,'wb'))     
-    
+        pic_filename =  save_path +'/' + save_name + '.p'
+        # cPickle.dump(activations, open(pic_filename,'wb')) 
+
+    data_to_save = {'SSAType': experiment['SSAType'],
+                    'IPI': experiment['duration_of_stim'],
+                    'ITI': experiment['inter_tone_interval']*('pair' in experiment['SSAType'] or 'Pair' in experiment['SSAType']), # 0 if single tone
+                    'activations': activations,
+                    'frequency': stand_freq}
+
     # return(spike_times_txt, axon_activity_vars)
-    return axon_activity_vars, activations
+    return axon_activity_vars, data_to_save
 
 
 ###Example Run -
 if __name__ == '__main__' :
+
+    print('Presentations changed to 250, change back to 500!')
 
     save_path = 'thalamocortical_Oren/CreateThalamicInputs/test_times'#directory to save the files in 
 
@@ -210,7 +221,6 @@ if __name__ == '__main__' :
 
     experiment['simulation_end_time'] = (experiment['duration_between_stims'] + experiment['duration_of_stim'])*experiment['ssa_presentations'] + experiment['first_stimulus_time']
     simulation_duration = experiment['simulation_end_time']   # bilogical time
-    experiment['inter_tone_interval'] = 120
 
     def run_experiment(Standard, Deviant, BS, spike_replay_name):
         # spike_replay_name: Path to save spike times
@@ -218,33 +228,39 @@ if __name__ == '__main__' :
         experiment['stand_dev_couple'] = [Standard, Deviant]
         experiment['frequencies']      = SSA_protocol_stimulations(experiment)
 
-        axon_activity_vars, data_to_save = create_axons_spikes(BS, experiment, save_path=save_path, save_name =spike_replay_name )
+        axon_activity_vars, data_to_save = create_axons_spikes(Standard, BS, experiment, save_path=save_path, save_name =spike_replay_name )
 
         return experiment['frequencies'], data_to_save
 
     times = range(experiment['first_stimulus_time'], experiment['simulation_end_time'], experiment['duration_of_stim']) 
-    times = [[i, i+experiment['inter_tone_interval']] for i in times]
-    times = [j for i in times for j in i]
+    times = flatten([[i, i+experiment['inter_tone_interval']] for i in times])
 
-    stim_times, data_to_save = {}, {}
-
-    if 'pair' in experiment['SSAType'] or 'Pair' in experiment['SSAType']: 
-      data_to_save['ITI'] = experiment['inter_tone_interval']
-    else:
-      data_to_save['ITI'] = 0
-    data_to_save['SSAType'] = experiment['SSAType']
-    data_to_save['IPI'] = experiment['duration_of_stim']
+    stim_times = {}
 
     os.system("osascript -e \'display notification \"Input filename!\" with title \"User input required\" sound name \"Submarine\"\'")
     user_input = input("How to call the file? (inter-tone interval = {}, inter-pair interval = {}) ".format(experiment['inter_tone_interval'], experiment['duration_of_stim']))
-    specific_filename = '{}.dat'.format(user_input)
-    stim_order, data_to_save[6666] = run_experiment(6666, 9600, 106746, 'input6666_106746_{}'.format(specific_filename))
-    stim_times[6666] = [[i, 6666] for i in times]
-    stim_order, data_to_save[9600] = run_experiment(9600, 6666, 109680, 'input9600_109680_{}'.format(specific_filename))
-    stim_times[9600] = [[i, 9600] for i in times]
 
-    cPickle.dump(stim_times, open(save_path + '/stim_times{}.p'.format(specific_filename.split('.')[0]), 'wb'))
-    cPickle.dump(data_to_save, open(save_path + '/' + user_input + '/.p', 'wb'))
+
+    if 'BroadBand' in experiment['SSAType']:
+        specific_filename = 'inputBroadBand_{}'.format(user_input)
+
+        _, data_to_save = run_experiment('BroadBand', 'BroadBand', 106746, specific_filename)
+        data_to_save['stim_times'] = [[i, 'BB'] for i in times]
+        cPickle.dump(data_to_save, open(save_path + '/' + specific_filename + '.p', 'wb'))
+    
+    else:
+        specific_filename = 'input6666_{}'.format(user_input)
+
+        stim_order, data_to_save_6666 = run_experiment(6666, 9600, 106746, specific_filename)
+        data_to_save_6666['stim_times'] = [[times[i], stim_order[i]] for i in range(len(times))]
+        cPickle.dump(data_to_save_6666, open(save_path + '/' + specific_filename + '.p', 'wb'))
+
+        # stim_order, data_to_save_9600 = run_experiment(9600, 6666, 109680, 'input9600_{}'.format(specific_filename))
+        # data_to_save_9600['stim_times'] = [[times[i], stim_order[i]] for i in range(len(times))]
+        # cPickle.dump(data_to_save_9600, open(save_path + '/' + specific_filename + '.p', 'wb'))
+
+    
+    
 
 
 

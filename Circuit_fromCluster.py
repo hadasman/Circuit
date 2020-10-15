@@ -33,12 +33,14 @@ else:
 	job_id = input('Job ID? ')
 
 sys.path.append('cluster_downloadables/{}/'.format(job_id))
+thalamic_params, Pyr_input_params, recording_dt = None, None, None
 exec('from Parameter_Initialization_{} import *'.format(job_id))
 
 # ============================================  Define Functions & Constants  ============================================
-def adjustment_OldInputs():
-	try: thalamic_params 
-	except: 
+def adjustment_OldInputs(thalamic_params, Pyr_input_params, recording_dt):
+	print(recording_dt)
+
+	if not thalamic_params:
 		print('No thalamic parameters given! Please input manually')
 		thalamic_params = {
 			'type': input('single or pair? '),
@@ -47,16 +49,16 @@ def adjustment_OldInputs():
 			'freq': input('Frequency? (__Hz or BroadBand): ')
 		}
 
-	try: Pyr_input_params
-	except:
+	if not Pyr_input_params:
 		print('No Pyramidal input parameters given! Please input manually')
 		Pyr_input_params = {
 			'Dep': int(input('Dep? ')),
 			'Fac': int(input('Fac? ')),
 			'Use': int(input('Use? '))
 		}
-	try: recording_dt
-	except: recording_dt = h.dt
+
+	if not recording_dt:
+		recording_dt = h.dt
 
 	return thalamic_params, Pyr_input_params, recording_dt
 
@@ -209,7 +211,7 @@ def get_GIDs(upload_from):
 
 # ============================================  Load Data from Cluster Dumps  ============================================
 
-thalamic_params, Pyr_input_params, recording_dt = adjustment_OldInputs()
+thalamic_params, Pyr_input_params, recording_dt = adjustment_OldInputs(thalamic_params, Pyr_input_params, recording_dt)
 activated_filename 	= get_thalamic_input_filename(thalamic_params)
 thalamic_path 		= get_thalamic_recordings_path(activated_filename)
 

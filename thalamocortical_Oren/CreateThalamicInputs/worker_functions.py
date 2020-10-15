@@ -208,64 +208,65 @@ def create_time_to_spike_frequency_func(experiment, axon_activity_vars):
         
         # HADAS: Fixed because python3 can't process comparing None to integer (originally this was inside the loop for some reason)
         if not max_firing_rate or max_firing_rate<axon_stim_firing_rate + axon_spontanues_firing_rate: 
-            max_firing_rate = axon_stim_firing_rate + axon_spontanues_firing_rate
+            max_firing_rate = axon_stim_firing_rate + axon_spontanues_firing_rate # about half of this will be the firing rate
 
         if firing_rate_list==[]:
             firing_rate_list.append([0, axon_activity_vars['first_stimulus_time'], lambda t,axon_spontanues_firing_rate=axon_spontanues_firing_rate: axon_spontanues_firing_rate])   
 
 
         if 'pair' in experiment['SSAType'] or 'Pair' in experiment['SSAType']:
+            gap                 = max([experiment['inter_tone_interval'] - experiment['first_marker_duration'], 0])
+
             start_stim_1        = firing_rate_list[-1][1]
-            end_stim_1          = start_stim_1 + axon_activity_vars['inter_tone_interval'] # 
-            start_stim_2        = end_stim_1
-            end_stim_2          = start_stim_2 + (axon_activity_vars['duration_of_stim'](stim_num) - axon_activity_vars['inter_tone_interval'])
-            end_between_stims   = end_stim_2 + axon_activity_vars['duration_between_stims']
+            end_stim_1          = start_stim_1 + experiment['first_marker_duration'] # 
+            start_stim_2        = end_stim_1 # Gap is inserted in alpha delay for func2, because putting it here means another spont_func between stims
+            end_stim_2          = start_stim_2 + (axon_activity_vars['duration_of_stim'](stim_num) - experiment['first_marker_duration'])
 
             start_spont = end_stim_2
+            end_between_stims   = start_spont + axon_activity_vars['duration_between_stims']
 
         else:
             start_stim_1        = firing_rate_list[-1][1]
-            end_stim_1          = start_stim_1 + axon_activity_vars['duration_of_stim'](stim_num)
-            end_between_stims   = end_stim_1 + axon_activity_vars['duration_between_stims']
+            end_stim_1          = start_stim_1 + axon_activity_vars['duration_of_stim'](stim_num)            
 
             start_spont = end_stim_1
-
-
-       # axon_activity_vars['alpha_func_delay'] is a function; see def get_alpha_func_delay
-        alpha_delay_1 = start_stim_1 + axon_activity_vars['alpha_func_delay'](axon_activity_vars['prefered_freq'], frequency)
-        alpha_tau_1   = axon_activity_vars['alpha_func_tau']
-
+            end_between_stims   = start_spont + axon_activity_vars['duration_between_stims']
 
         '''The alpha function (original: t^n * exp(-t/tau)). Added parameters:
             - delay: moves the function on x axis
             - stim_FR/alpha_tau: sharpens function
             - +1: Makes maxium higher (equal to stim_FR)
             - n=1'''
+        alpha_delay_1 = start_stim_1 + axon_activity_vars['alpha_func_delay'](axon_activity_vars['prefered_freq'], frequency) # axon_activity_vars['alpha_func_delay'] is a function; see def get_alpha_func_delay
+        alpha_tau_1   = axon_activity_vars['alpha_func_tau']
+        # stim_func_1  = lambda t, stim_FR=axon_stim_firing_rate, spont_FR=axon_spontanues_firing_rate, alpha_delay=alpha_delay_1, alpha_tau=alpha_tau_1:\
+        #             max([experiment['first_marker_minimal_FR'], (spont_FR + (stim_FR*(t-alpha_delay) / alpha_tau) * exp((-(t - alpha_delay)/alpha_tau)+1))]) \
+        #             if t>alpha_delay else spont_FR
         stim_func_1  = lambda t, stim_FR=axon_stim_firing_rate, spont_FR=axon_spontanues_firing_rate, alpha_delay=alpha_delay_1, alpha_tau=alpha_tau_1:\
-                    (spont_FR + (stim_FR*(t-alpha_delay) / alpha_tau) * exp((-(t - alpha_delay)/alpha_tau)+1)) \
+                    max([experiment['first_marker_minimal_FR'], (spont_FR + (stim_FR*(t-alpha_delay) / alpha_tau) * exp((-(t - alpha_delay)/alpha_tau)+1))]) \
                     if t>alpha_delay else spont_FR
 
 
-        if 'pair' in experiment['SSAType']:
+        if 'pair' in experiment['SSAType'] or 'Pair' in experiment['SSAType']:
+            alpha_delay_2 = start_stim_2 + gap + axon_activity_vars['alpha_func_delay'](axon_activity_vars['prefered_freq'], frequency)
+            alpha_tau_2 = axon_activity_vars['alpha_func_tau']
             stim_func_2  = lambda t, stim_FR=axon_stim_firing_rate, spont_FR=axon_spontanues_firing_rate, alpha_delay=alpha_delay_2, alpha_tau=alpha_tau_2:\
                         (spont_FR + (stim_FR*(t-alpha_delay) / alpha_tau) * exp((-(t - alpha_delay)/alpha_tau)+1)) \
                         if t>alpha_delay else spont_FR
-            alpha_delay_2 = start_stim_2 + axon_activity_vars['alpha_func_delay'](axon_activity_vars['prefered_freq'], frequency)
-            alpha_tau_2 = axon_activity_vars['alpha_func_tau']
 
         spont_func = lambda t, spont_FR=axon_spontanues_firing_rate: spont_FR
        
-
         # Append functions to list
         firing_rate_list.append([start_stim_1, end_stim_1, stim_func_1]) 
         
-        if 'pair' in experiment['SSAType']:
+        if 'pair' in experiment['SSAType'] or 'Pair' in experiment['SSAType']:
             firing_rate_list.append([start_stim_2, end_stim_2, stim_func_2])
         
         firing_rate_list.append([start_spont, end_between_stims, spont_func]) # DONT CHANGE BEFORE CONSIDERING IMPACT ON START_STIM
         
         func = True
     return(time_to_firing_rate_frequency_class(firing_rate_list, max_firing_rate, dt, func))#max(firing_rate_list),dt))
+
 
 
 

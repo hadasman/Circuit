@@ -3,6 +3,7 @@ from tqdm import tqdm
 import numpy as np
 import pdb
 import math
+import itertools
 
 def plotThalamicResponses(stimuli, freq1, freq2, thalamic_locations, run_function=False, axon_gids=None):
 	if run_function:
@@ -18,7 +19,7 @@ def plotThalamicResponses(stimuli, freq1, freq2, thalamic_locations, run_functio
 
 		return stim_ax
 
-def Wehr_Zador(population, cell_name, stimulus, title_, exc_weight=0, inh_weight=0, standard_freq=None, input_pop_outputs=None, take_before=20, take_after=155, tstop=None, spike_threshold=None, dt=0.025, t=None):
+def Wehr_Zador(population, cell_name, stimulus, title_, exc_weight=0, inh_weight=0, standard_freq=None, input_pop_recorded=[], take_before=20, take_after=155, tstop=None, spike_threshold=None, dt=0.025, t=None):
 
 	def plot_traces(h_ax, all_means, which_traces='Currents', units_='nA'):
 
@@ -35,7 +36,8 @@ def Wehr_Zador(population, cell_name, stimulus, title_, exc_weight=0, inh_weight
 		h_ax.axvline(0, LineStyle='--', color='gray')
 		h_ax.plot(t_vec, [AMPA[i]+NMDA[i] for i in range(n_points)], 'purple', label='%s$_{AMPA}$ + %s$_{NMDA}$'%(which_plot, which_plot))
 
-		if input_pop_outputs:
+		if any(input_pop_recorded):
+			input_pop_outputs = population.cell_inputs[cell_name]
 			GABA = [i*unit_conversion for i in all_means['%s_GABA'%which_plot]]
 			if list(input_pop_outputs.values())[0]:
 				h_ax.plot(t_vec, GABA, 'b', label='%s$_{GABA}$'%which_plot)
@@ -49,6 +51,8 @@ def Wehr_Zador(population, cell_name, stimulus, title_, exc_weight=0, inh_weight
 	if not population:
 		return
 
+	
+	_, individual_ax = plt.subplots()
 	fig, axes = plt.subplots(3, 1)
 	fig.subplots_adjust(hspace=0.34, bottom=0.08, top=0.9) 
 	times = [i for i in stimulus.stim_times_all if i<tstop]
@@ -83,7 +87,7 @@ def Wehr_Zador(population, cell_name, stimulus, title_, exc_weight=0, inh_weight
 				all_sums[i].append(np.sum(temp_vec, axis=0))
 
 		# ========== Inhibition to cell ==========
-		if input_pop_outputs:
+		if any(input_pop_recorded):
 			for pre_PV in input_pop_outputs:
 				for i in ['i_GABA', 'g_GABA']:
 					temp_vec = [cut_vec(vec, idx1, idx2) for vec in input_pop_outputs[pre_PV][i]]
@@ -104,14 +108,22 @@ def Wehr_Zador(population, cell_name, stimulus, title_, exc_weight=0, inh_weight
 		idx_start_stim = int((take_before)/dt)
 		if any(detect_spike(v_vec[idx_spont:])) and not any(detect_spike(v_vec[idx_start_stim:idx_spont])):
 			soma_plot_color = 'r'
-		else:
+		elif any(detect_spike(v_vec[idx_spont:])) and any(detect_spike(v_vec[idx_start_stim:idx_spont])):
 			soma_plot_color = 'k'
+		elif not any(detect_spike(v_vec[idx_spont:])) and any(detect_spike(v_vec[idx_start_stim:idx_spont])):
+			soma_plot_color = 'g'
+		else:
+			soma_plot_color = 'orange'
 		axes[0].plot(t_vec, v_vec, color=soma_plot_color, LineWidth=0.7)
+
+		individual_ax.plot(t_vec, v_vec)
 
 	# Average over time points
 	for i in all_means:
 		all_means[i] = np.mean(all_means[i][:-1], axis=0)
-	t_vec = [i*dt for i in range(0, len(all_means['i_AMPA']))]
+		if type(all_means[i])==float or type(all_means[i])==int:
+			all_means[i] = []
+	t_vec = [(i*dt)-take_before for i in range(0, len(all_means['i_AMPA']))]
 	n_points = len(t_vec)
 
 	plt.suptitle('{} (GID: {}) Cell ({} spikes out of {})'.format(title_, population.name_to_gid[cell_name], spike_count, len(times)))
@@ -119,7 +131,12 @@ def Wehr_Zador(population, cell_name, stimulus, title_, exc_weight=0, inh_weight
 	axes[0].set_title('Overlay of Somatic Responses to %sHz Simulus (locked to stimulus presentation)'%standard_freq)
 	axes[0].set_ylabel('V (mV)')
 	axes[0].set_xlim([-take_before, take_after])
-	
+	axes[0].plot(0, 0, 'r', label='Spike only late')
+	axes[0].plot(0, 0, 'k', label='Both evoked and late spike')
+	axes[0].plot(0, 0, 'g', label='Spike only evoked')
+	axes[0].plot(0, 0, 'orange', label='No spikes')
+	axes[0].legend()
+
 	# ========== Plot Currents ==========
 	plot_traces(axes[1], all_means, which_traces='Currents', units_='nA')
 
@@ -331,6 +348,60 @@ def Wehr_Zador_fromData(job_id, data, cell_name, stim_times, exc_weight=0, inh_w
 		
 		return g_AMPA, g_NMDA, i_AMPA, i_NMDA, soma_v, gid, g_GABA, i_GABA
 
+	def separate_late_early_spikes(syn_recordings, idx_start1, idx_end1, idx_start2, idx_end2, color_cond_dict):
+		if not any(detect_spike(v_vec[idx_start1:idx_end1])) and any(detect_spike(v_vec[idx_start2:idx_end2])):
+			soma_plot_color = color_cond_dict['with_late_without_early']
+
+			syn_recordings['with_late_without_early']['i_AMPA'].append(all_means['i_AMPA'][-1])
+			syn_recordings['with_late_without_early']['g_AMPA'].append(all_means['g_AMPA'][-1])
+			syn_recordings['with_late_without_early']['i_NMDA'].append(all_means['i_NMDA'][-1])
+			syn_recordings['with_late_without_early']['g_NMDA'].append(all_means['g_NMDA'][-1])
+			if hasattr(g_GABA, "__len__"):
+				if len(g_GABA) > 0:
+					for pre_cell in g_GABA:
+						syn_recordings['with_late_without_early']['i_GABA_%s'%pre_cell].append(all_means['i_GABA'][pre_cell][-1])
+						syn_recordings['with_late_without_early']['g_GABA_%s'%pre_cell].append(all_means['g_GABA'][pre_cell][-1])
+		
+		elif any(detect_spike(v_vec[idx_start1:idx_end1])) and any(detect_spike(v_vec[idx_start2:idx_end2])):
+			soma_plot_color = color_cond_dict['with_late_with_early']
+
+			syn_recordings['with_late_with_early']['i_AMPA'].append(all_means['i_AMPA'][-1])
+			syn_recordings['with_late_with_early']['g_AMPA'].append(all_means['g_AMPA'][-1])
+			syn_recordings['with_late_with_early']['i_NMDA'].append(all_means['i_NMDA'][-1])
+			syn_recordings['with_late_with_early']['g_NMDA'].append(all_means['g_NMDA'][-1])
+			if hasattr(g_GABA, "__len__"):
+				if len(g_GABA) > 0:
+					for pre_cell in g_GABA:
+						syn_recordings['with_late_with_early']['i_GABA_%s'%pre_cell].append(all_means['i_GABA'][pre_cell][-1])
+						syn_recordings['with_late_with_early']['g_GABA_%s'%pre_cell].append(all_means['g_GABA'][pre_cell][-1])
+
+		elif any(detect_spike(v_vec[idx_start1:idx_end1])) and not any(detect_spike(v_vec[idx_start2:idx_end2])):
+			soma_plot_color = color_cond_dict['without_late_with_early']
+
+			syn_recordings['without_late_with_early']['i_AMPA'].append(all_means['i_AMPA'][-1])
+			syn_recordings['without_late_with_early']['g_AMPA'].append(all_means['g_AMPA'][-1])
+			syn_recordings['without_late_with_early']['i_NMDA'].append(all_means['i_NMDA'][-1])
+			syn_recordings['without_late_with_early']['g_NMDA'].append(all_means['g_NMDA'][-1])
+			if hasattr(g_GABA, "__len__"):
+				if len(g_GABA) > 0:
+					for pre_cell in g_GABA:
+						syn_recordings['without_late_with_early']['i_GABA_%s'%pre_cell].append(all_means['i_GABA'][pre_cell][-1])
+						syn_recordings['without_late_with_early']['g_GABA_%s'%pre_cell].append(all_means['g_GABA'][pre_cell][-1])
+
+		else:
+			soma_plot_color = color_cond_dict['without_late_without_early']
+
+			syn_recordings['without_late_without_early']['i_AMPA'].append(all_means['i_AMPA'][-1])
+			syn_recordings['without_late_without_early']['g_AMPA'].append(all_means['g_AMPA'][-1])
+			syn_recordings['without_late_without_early']['i_NMDA'].append(all_means['i_NMDA'][-1])
+			syn_recordings['without_late_without_early']['g_NMDA'].append(all_means['g_NMDA'][-1])
+			if hasattr(g_GABA, "__len__"):
+				if len(g_GABA) > 0:
+					for pre_cell in g_GABA:
+						syn_recordings['without_late_without_early']['i_GABA_%s'%pre_cell].append(all_means['i_GABA'][pre_cell][-1])
+						syn_recordings['without_late_without_early']['g_GABA_%s'%pre_cell].append(all_means['g_GABA'][pre_cell][-1])
+		return syn_recordings, soma_plot_color
+
 	def plot_traces(t_vec, n_points, h_ax, all_means, which_traces='Currents', units_='nA'):
 
 		if which_traces == 'Currents':
@@ -382,25 +453,34 @@ def Wehr_Zador_fromData(job_id, data, cell_name, stim_times, exc_weight=0, inh_w
 	
 	spike_count = 0
 	all_means = {'i_AMPA': [], 'g_AMPA': [], 'i_NMDA': [], 'g_NMDA': []}
+	syn_recordings = {'with_late_without_early': {'i_AMPA': [], 'g_AMPA': [], 'i_NMDA': [], 'g_NMDA': []}, 
+					  'with_late_with_early': {'i_AMPA': [], 'g_AMPA': [], 'i_NMDA': [], 'g_NMDA': []},
+					  'without_late_without_early': {'i_AMPA': [], 'g_AMPA': [], 'i_NMDA': [], 'g_NMDA': []},
+					  'without_late_with_early': {'i_AMPA': [], 'g_AMPA': [], 'i_NMDA': [], 'g_NMDA': []}}
+
 	if hasattr(g_GABA, "__len__"):
 		if len(g_GABA) > 0:
 			all_means['g_GABA'] = {pre_cell: [] for pre_cell in g_GABA}
 			all_means['i_GABA'] = {pre_cell: [] for pre_cell in i_GABA}
+
+			inh_conditions = [j for i in [list(zip(cond, g_GABA)) for cond in itertools.permutations(['i', 'g'], len(g_GABA))] for j in i]
+			syn_recordings['with_late_without_early'].update({'%s_GABA_%s'%(cond, pre_cell): [] for (cond, pre_cell) in inh_conditions})
+			syn_recordings['with_late_with_early'].update({'%s_GABA_%s'%(cond, pre_cell): [] for (cond, pre_cell) in inh_conditions})
+			syn_recordings['without_late_without_early'].update({'%s_GABA_%s'%(cond, pre_cell): [] for (cond, pre_cell) in inh_conditions})
+			syn_recordings['without_late_with_early'].update({'%s_GABA_%s'%(cond, pre_cell): [] for (cond, pre_cell) in inh_conditions})
 
 	print('Analyzing conductances and currents')
 
 	if take_after+times[-1]>t[-1]: times = times[:-1] # If take_after goes beyond recording, discard last stimulus
 
 	for T in tqdm(times):
-		# idx1 = (np.abs([i-(T-take_before) for i in t])).argmin()
-		# idx2 = (np.abs([i-(T+take_after) for i in t])).argmin()
 		
 		idx1 = int((T-take_before)/dt)
 		idx2 = int((T+take_after)/dt)
 		
 		t_vec = cut_vec(t, idx1, idx2)
-
 		t_vec = [i-t_vec[0]-take_before for i in t_vec]
+		
 		v_vec = cut_vec(soma_v, idx1, idx2)
 		if any([i>=spike_threshold for i in v_vec]):
 			spike_count += 1
@@ -415,41 +495,30 @@ def Wehr_Zador_fromData(job_id, data, cell_name, stim_times, exc_weight=0, inh_w
 				all_means['g_GABA'][pre_cell].append(cut_vec(g_GABA[pre_cell], idx1, idx2))
 				all_means['i_GABA'][pre_cell].append(cut_vec(i_GABA[pre_cell], idx1, idx2))
 
-
-		soma_plot_color = 'k'
+		current_soma_color = 'k'
 		if stim_params['mark_second']:
+			color_cond_dict = {'with_late_without_early': 'r', 'with_late_with_early': 'k', 'without_late_with_early': 'g', 'without_late_without_early': 'orange'}
 			detect_spike = lambda vec: [i for i in range(1, len(vec)-1) if (vec[i]>vec[i-1]) and (vec[i]>vec[i+1]) and (vec[i]>spike_threshold)]
 
 			if stim_params['type']=='pairs':
 				try: axes[0].axvline(stim_params['ITI'], color='gray', LineStyle='--', LineWidth=0.7)
 				except: print('In Wehr_Zador_fromData(): not marking 2nd stimulus on plot because no ITI given to function')
 
-				idx_first_stim = int((take_before)/dt)
-				idx_end_first_stim = int((take_before+50)/dt)
-				idx_second_stim = int((take_before+stim_params['ITI'])/dt)
-				idx_end_second_stim = int((take_before+stim_params['ITI']+50)/dt)
-				if any(detect_spike(v_vec[idx_second_stim:idx_end_second_stim])):
-					if any(detect_spike(v_vec[idx_first_stim:idx_end_first_stim])):
-						soma_plot_color = 'r'
-					else:
-						soma_plot_color = 'g'
+				early_start = int((take_before)/dt)
+				early_end = int((take_before+50)/dt)
+				late_start = int((take_before+stim_params['ITI'])/dt)
+				late_end = int((take_before+stim_params['ITI']+50)/dt)
 
 			elif stim_params['type']=='single':
-
+				early_start = int(take_before/dt)
+				early_end = int((take_before+30)/dt)
 				late_start = int((take_before+40)/dt)
 				late_end = int((take_before+100)/dt)
-				stim_end = int((take_before+30)/dt)
-				stim_start = int(take_before/dt)
-				if any(detect_spike(v_vec[late_start:late_end])) and not any(detect_spike(v_vec[stim_start:stim_end])):
-					soma_plot_color = 'r'			
-				elif any(detect_spike(v_vec[late_start:late_end])) and any(detect_spike(v_vec[stim_start:stim_end])):
-					soma_plot_color = 'k'
-				elif not any(detect_spike(v_vec[late_start:late_end])) and any(detect_spike(v_vec[stim_start:stim_end])):
-					soma_plot_color = 'g'
-				else:
-					soma_plot_color = 'orange'
-		axes[0].plot(t_vec, v_vec, color=soma_plot_color, LineWidth=0.7)
-				
+
+			syn_recordings, current_soma_color = separate_late_early_spikes(syn_recordings, early_start, early_end, late_start, late_end, color_cond_dict)
+
+		axes[0].plot(t_vec, v_vec, color=current_soma_color, LineWidth=0.7)
+
 	# Average over time points
 	max_g_AMPA = np.max(all_means['g_AMPA'][:-1], axis=0); min_g_AMPA = np.min(all_means['g_AMPA'][:-1], axis=0)
 	max_g_NMDA = np.max(all_means['g_NMDA'][:-1], axis=0); min_g_NMDA = np.min(all_means['g_NMDA'][:-1], axis=0)
@@ -462,6 +531,11 @@ def Wehr_Zador_fromData(job_id, data, cell_name, stim_times, exc_weight=0, inh_w
 				all_means[i][j] = np.mean(all_means[i][j][:-1], axis=0)
 		else:
 			all_means[i] = np.mean(all_means[i][:-1], axis=0)
+
+	# axes[0].plot(t_vec, np.sum([all_means['i_AMPA'], all_means['i_NMDA']], axis=0), 'purple', label='i$_{AMPA}$ + i$_{NMDA}$')
+	# if 'i_GABA' in all_means:
+	# 	axes[0].plot(t_vec, np.sum([all_means['i_GABA'][i] for i in all_means['i_GABA']], axis=0))
+
 
 	t_vec_tot = [(i*dt)-take_before for i in range(0, len(all_means['i_AMPA']))]	
 	n_points = len(t_vec_tot)
@@ -484,6 +558,43 @@ def Wehr_Zador_fromData(job_id, data, cell_name, stim_times, exc_weight=0, inh_w
 	# ========== Plot Conductances ==========
 	plot_traces(t_vec_tot, n_points, axes[2], all_means, which_traces='Conductances', units_='nS')
 	axes[2].set_xlabel('T (ms)')
+
+	if stim_params['mark_second']:
+		FIG, AX = plt.subplots(len(syn_recordings['with_late_without_early']), 1)
+		FIG.subplots_adjust(hspace=0.62, bottom=0.06, top=0.93, left=0.1, right=0.97) 
+
+		for i, rec in enumerate(syn_recordings['with_late_without_early']):
+			AX[i].set_title(rec)
+
+			if 'g_' in rec:
+				if syn_recordings['with_late_without_early'][rec]:
+					AX[i].plot(t_vec_tot, [i*1000 for i in np.mean(syn_recordings['with_late_without_early'][rec], axis=0)], color='r', label='with_late_without_early')
+				if syn_recordings['with_late_with_early'][rec]:
+					AX[i].plot(t_vec_tot, [i*1000 for i in np.mean(syn_recordings['with_late_with_early'][rec], axis=0)], color='k', label='with_late_with_early')
+				if syn_recordings['without_late_with_early'][rec]:
+					AX[i].plot(t_vec_tot, [i*1000 for i in np.mean(syn_recordings['without_late_with_early'][rec], axis=0)], color='g', label='without_late_with_early')
+				if syn_recordings['without_late_without_early'][rec]:
+					AX[i].plot(t_vec_tot, [i*1000 for i in np.mean(syn_recordings['without_late_without_early'][rec], axis=0)], color='orange', label='without_late_without_early')
+
+				AX[i].set_ylabel('nS')
+			else:
+				if syn_recordings['with_late_without_early'][rec]:
+					AX[i].plot(t_vec_tot, np.mean(syn_recordings['with_late_without_early'][rec], axis=0), color='r', label='with_late_without_early')
+				if syn_recordings['with_late_with_early'][rec]:
+					AX[i].plot(t_vec_tot, np.mean(syn_recordings['with_late_with_early'][rec], axis=0), color='k', label='with_late_with_early')
+				if syn_recordings['without_late_with_early'][rec]:
+					AX[i].plot(t_vec_tot, np.mean(syn_recordings['without_late_with_early'][rec], axis=0), color='g', label='without_late_with_early')
+				if syn_recordings['without_late_without_early'][rec]:
+					AX[i].plot(t_vec_tot, np.mean(syn_recordings['without_late_without_early'][rec], axis=0), color='orange', label='without_late_without_early')
+				AX[i].set_ylabel('nA')
+
+			# AX[i].legend()
+			AX[i].xaxis.set_visible(False) 
+		AX[-1].set_xlabel('T (ms)')
+		AX[-1].xaxis.set_visible(True) 
+
+		handles, labels = AX[0].get_legend_handles_labels()
+		FIG.legend(handles, labels, loc='upper right')
 
 	return axes
 

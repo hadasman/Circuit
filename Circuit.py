@@ -125,11 +125,15 @@ def get_GIDs(upload_from):
 def get_thalamic_input_filename(thalamic_params):
 	fname_check = lambda fname, fchecks: all([f in fname for f in fchecks])
 
-	if thalamic_params['type'] == 'pairs':	
+	if 'pair' in thalamic_params['type']:	
 		path_ = 'thalamocortical_Oren/CreateThalamicInputs/test_times/tone_pairs'	
+
 		activated_filename = [i for i in os.listdir(path_) if fname_check(i, [thalamic_params['freq'], '.p', 'ITI_%s'%thalamic_params['ITI'], 'IPI_%s'%thalamic_params['IPI']])]
 
-	elif thalamic_params['type'] == 'single':
+		if thalamic_params['marker1_extension']:
+			activated_filename = [i for i in activated_filename if fname_check(i, ['marker1', '%sHz'%thalamic_params['marker1_extension']['Hz'], '%sms'%thalamic_params['marker1_extension']['ms']])]
+	
+	elif 'single' in thalamic_params['type']:
 		path_ = 'thalamocortical_Oren/CreateThalamicInputs/test_times/single_tone'
 		activated_filename = [i for i in os.listdir(path_) if fname_check(i, [thalamic_params['freq'], '.p', 'IPI_%s'%thalamic_params['IPI']])]
 
@@ -271,7 +275,7 @@ def RunSim(v_init=-75, tstop=154*1000, record_specific=None):
 	dend_v = []
 	if record_specific:
 		dend_v = h.Vector()
-		dend_v.record(record_specific._ref_v)
+		dend_v.record(record_specific._ref_v, recording_dt)
 
 	t = h.Vector()
 	t.record(h._ref_t, recording_dt)
@@ -323,7 +327,7 @@ activated_filename = get_thalamic_input_filename(thalamic_params)
 stimulus = Stimulus(thalamic_params, filenames['stim_times'], filenames['thalamic_activations'], tstop=tstop)
 
 # ===============================================  Create Cell Populations  ===============================================
-Pyr_pop, PV_pop, SOM_pop = CreatePopulations(n_pyr=1, n_PV=0, n_SOM=0)
+Pyr_pop, PV_pop, SOM_pop = CreatePopulations(n_pyr=1, n_PV=1, n_SOM=0)
 # Pyr_pop, PV_pop, SOM_pop = CreatePopulations(n_pyr=1, n_PV=len(chosen_GIDs['PV']), n_SOM=1)
 
 IClamp = h.IClamp(Pyr_pop.cells['Pyr0']['soma'](0.5))
@@ -354,8 +358,8 @@ set_CorticalInputs(pre_pop=SOM_pop, post_pop=Pyr_pop, connect_pops=connect_SOM_t
 
 # ============================================== Run Simulation ==============================================
 if record_channel:
-	axon_gsk = h.Vector(); axon_gsk.record(Pyr_pop.cells['Pyr0']['axons'][0](0)._ref_gSK_E2_SK_E2)
-	somatic_gsk = h.Vector(); somatic_gsk.record(Pyr_pop.cells['Pyr0']['soma'](0.5)._ref_gSK_E2_SK_E2)
+	axon_gsk = h.Vector(); axon_gsk.record(Pyr_pop.cells['Pyr0']['axons'][0](0)._ref_gSK_E2_SK_E2, recording_dt)
+	somatic_gsk = h.Vector(); somatic_gsk.record(Pyr_pop.cells['Pyr0']['soma'](0.5)._ref_gSK_E2_SK_E2, recording_dt)
 
 print('\n========== Running Simulation (time: {}:{:02d}) =========='.format(time_module.localtime().tm_hour, time_module.localtime().tm_min))
 
@@ -370,7 +374,7 @@ if record_i_membrane:
 		mem_I[sec.name()] = {}
 		for seg in sec:
 			mem_I[sec.name()][seg] = h.Vector()
-			mem_I[sec.name()][seg].record(seg._ref_i_membrane) # Units of i_membrane: mA/cm2
+			mem_I[sec.name()][seg].record(seg._ref_i_membrane, recording_dt) # Units of i_membrane: mA/cm2
 
 record_cap_i = False
 if record_cap_i:
@@ -378,7 +382,7 @@ if record_cap_i:
 	for sec in PV_pop.cells['PV0']['cell'].all:
 		cap_I[sec.name()] = {}
 		for seg in sec:
-			cap_I[sec.name()][seg] = h.Vector().record(seg._ref_i_cap) # (mA/cm2)
+			cap_I[sec.name()][seg] = h.Vector().record(seg._ref_i_cap, recording_dt) # (mA/cm2)
 
 disable_NMDA_PV = False
 if disable_NMDA_PV:
@@ -390,10 +394,11 @@ if disable_NMDA_PV:
 record_soma_children = False
 if record_soma_children:
 	Pyr_soma_children = [i for i in Pyr_pop.cells['Pyr0']['soma'].children() if 'axon' not in i.name()]
-	Pyr_children_v = [h.Vector().record(i(1)._ref_v) for i in Pyr_soma_children]
+	Pyr_children_v = [h.Vector().record(i(1)._ref_v, recording_dt) for i in Pyr_soma_children]
 	Pyr_children_ri = [i(1).ri() for i in Pyr_soma_children]
+
 	PV_soma_children = [i for i in PV_pop.cells['PV0']['soma'].children() if 'axon' not in i.name()]
-	PV_children_v = [h.Vector().record(i(1)._ref_v) for i in PV_soma_children]
+	PV_children_v = [h.Vector().record(i(1)._ref_v, recording_dt) for i in PV_soma_children]
 	PV_children_ri = [i(1).ri() for i in PV_soma_children]
 
 start_time = time_module.time()
@@ -404,10 +409,12 @@ end_time = time_module.time()
 os.system("osascript -e \'display notification \"Simulation took %i seconds\" with title \"Simulation Finished\" sound name \"Submarine\"\'"%(end_time-start_time))
 print("Simulation took %i seconds"%(end_time-start_time))
 
+stim_times = list(range(2000, int(h.tstop), thalamic_params['IPI']))
+
 if Pyr_pop.cell_inputs:
-	Pyr_WZ_ax = Wehr_Zador(Pyr_pop, 'Pyr0', stimulus, 'Pyramidal', exc_weight=Pyr_input_weight, inh_weight=PV_to_Pyr_weight, input_pop_outputs=Pyr_pop.cell_inputs['Pyr0'], standard_freq=stand_freq, tstop=h.tstop, spike_threshold=spike_threshold, dt=recording_dt, t=t, take_after=250)
+	Pyr_WZ_ax = Wehr_Zador(Pyr_pop, 'Pyr0', stimulus, 'Pyramidal', exc_weight=Pyr_input_weight, inh_weight=PV_to_Pyr_weight, input_pop_recorded=[record_PV_syns, record_SOM_syns], standard_freq=stand_freq, tstop=h.tstop, spike_threshold=spike_threshold, dt=recording_dt, t=t, take_after=250)
 else:
-	Pyr_WZ_ax = Wehr_Zador(Pyr_pop, 'Pyr0', stimulus, 'Pyramidal', exc_weight=Pyr_input_weight, inh_weight=PV_to_Pyr_weight, input_pop_outputs=None, standard_freq=stand_freq, tstop=h.tstop, spike_threshold=spike_threshold, dt=recording_dt, t=t, take_after=250)
+	Pyr_WZ_ax = Wehr_Zador(Pyr_pop, 'Pyr0', stimulus, 'Pyramidal', exc_weight=Pyr_input_weight, inh_weight=PV_to_Pyr_weight, input_pop_recorded=[record_PV_syns, record_SOM_syns], standard_freq=stand_freq, tstop=h.tstop, spike_threshold=spike_threshold, dt=recording_dt, t=t, take_after=250)
 
 window = 10
 axes_h = None
@@ -435,6 +442,10 @@ if record_soma_children:
 
 		PV_I.append([j/temp_ri for j in temp_volt_diff])
 
+	plt.figure()
+	plt.title(r'Sum of Axial Current to Soma from Dendrites ($\frac{V_{soma}-V_{dend}}{R_i}$), [$\frac{mV}{m\Omega}$=nA]')
+	plt.plot(t, np.sum(PV_I, axis=0), label='PV')
+	plt.plot(t, np.sum(Pyr_I, axis=0), label='Pyr')
 if record_i_membrane:
 	def from_specific_to_total_current(original_I, from_l_unit='micro', to_l_unit='centi', from_i_unit='milli', to_i_unit='milli'):
 		'''
@@ -612,15 +623,6 @@ if Pyr_pop and do_cross_correlation_with_thal:
 
 
 
-
-'''
-
-somas_ax = PlotSomas({'Pyr0': Pyr_pop, 'PV0': PV_pop, 'SOM0': SOM_pop}, t, stimuli[stand_freq],  tstop=h.tstop, spike_threshold=spike_threshold, dt=h.dt)
-Pyr_WZ_ax = Wehr_Zador(Pyr_pop, 'Pyr0', stimuli, 'Pyramidal', exc_weight=Pyr_input_weight, inh_weight=PV_to_Pyr_weight, input_pop_outputs=Pyr_pop.cell_inputs['Pyr0'], standard_freq=stand_freq, tstop=h.tstop, spike_threshold=spike_threshold, dt=h.dt, t=t)
-SOM_WZ_ax = Wehr_Zador(SOM_pop, 'SOM0', stimuli, 'SOM', exc_weight=SOM_input_weight, input_pop_outputs=None, standard_freq=stand_freq, tstop=h.tstop, spike_threshold=spike_threshold, dt=h.dt, t=t)
-if PV_to_Pyr_source == 'voltage':
-	PV_WZ_ax = Wehr_Zador(PV_pop, 'PV0', stimuli, 'PV', exc_weight=PV_input_weight, inh_weight=SOM_to_PV_weight, input_pop_outputs=PV_pop.cell_inputs['PV0'], standard_freq=stand_freq, tstop=h.tstop, spike_threshold=spike_threshold, dt=h.dt, t=t)
-'''
 # ============================================== Analyze Input vs. Response ==============================================
 '''
 print('Analyzing input vs. Pyramidal somatic responses')

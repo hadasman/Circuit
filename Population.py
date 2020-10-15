@@ -386,6 +386,9 @@ class Population():
 		thalamic_activations_filename = checkValidFilename(thalamic_activations_filename, cond='in_dir')
 
 		thalamic_activations = cPickle.load(open(thalamic_activations_filename, 'rb'))
+		if 'ITI' in thalamic_activations:
+			thalamic_activations = thalamic_activations['activations'] # This should be in the new version of thalamic activations, the previous one was a dict with only axons as keys
+		
 		
 		cell_inputs = getInputs(thalamic_activations, connecting_gids)
 		
