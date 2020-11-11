@@ -19,7 +19,7 @@ def plotThalamicResponses(stimuli, freq1, freq2, thalamic_locations, run_functio
 
 		return stim_ax
 
-def Wehr_Zador(population, cell_name, stimulus, title_, exc_weight=0, inh_weight=0, standard_freq=None, input_pop_recorded=[], take_before=20, take_after=155, tstop=None, spike_threshold=None, dt=0.025, t=None):
+def Wehr_Zador(population, cell_name, stimulus, title_, exc_weight=0, inh_weight=0, standard_freq=None, thalamic_inputs_recorded=False, input_pop_recorded=[], take_before=20, take_after=155, tstop=None, spike_threshold=None, dt=0.025, t=None):
 
 	def plot_traces(h_ax, all_means, which_traces='Currents', units_='nA'):
 
@@ -123,7 +123,7 @@ def Wehr_Zador(population, cell_name, stimulus, title_, exc_weight=0, inh_weight
 		all_means[i] = np.mean(all_means[i][:-1], axis=0)
 		if type(all_means[i])==float or type(all_means[i])==int:
 			all_means[i] = []
-	t_vec = [(i*dt)-take_before for i in range(0, len(all_means['i_AMPA']))]
+	t_vec = [(i*dt)-take_before for i in np.arange(0, (take_before+take_after)/dt)]
 	n_points = len(t_vec)
 
 	plt.suptitle('{} (GID: {}) Cell ({} spikes out of {})'.format(title_, population.name_to_gid[cell_name], spike_count, len(times)))
@@ -137,12 +137,13 @@ def Wehr_Zador(population, cell_name, stimulus, title_, exc_weight=0, inh_weight
 	axes[0].plot(0, 0, 'orange', label='No spikes')
 	axes[0].legend()
 
-	# ========== Plot Currents ==========
-	plot_traces(axes[1], all_means, which_traces='Currents', units_='nA')
+	if thalamic_inputs_recorded:
+		# ========== Plot Currents ==========
+		plot_traces(axes[1], all_means, which_traces='Currents', units_='nA')
 
-	# ========== Plot Conductances ==========
-	plot_traces(axes[2], all_means, which_traces='Conductances', units_='nS')
-	axes[2].set_xlabel('T (ms)')
+		# ========== Plot Conductances ==========
+		plot_traces(axes[2], all_means, which_traces='Conductances', units_='nS')
+		axes[2].set_xlabel('T (ms)')
 
 	return axes
 
@@ -212,9 +213,9 @@ def PlotSomas(populations, t, stimulus, tstop=None, spike_threshold=None, dt=0.0
 
 	return h_ax
 
-def plotFRs(job_id, stim_times, soma_v, t, tstop=0, window=0, take_before=150, take_after=150, which_cell='', axes_h=None, color=''):
+def plotFRs(job_id, stim_times, soma_v, t, tstop=0, window=0, take_before=150, take_after=150, which_cell='', axes_h=None, color='', input_durations=None, return_FRs=False, single_ax=None, raster_ax=None, is_spontaneous=False):
 	def get_SpikeTimes(t, soma_v, threshold=0):
-
+		
 		spike_idx = [i for i in range(1, len(soma_v)) if (soma_v[i] > threshold) and 
 														 (soma_v[i] > soma_v[i-1]) and 
 														 (soma_v[i] > soma_v[i+1])]
@@ -230,7 +231,6 @@ def plotFRs(job_id, stim_times, soma_v, t, tstop=0, window=0, take_before=150, t
 		PSTH 		= []
 		
 		for time in stim_times:
-
 			shifted_spikes = [i-time for i in spike_times]
 			PSTH.append([spike for spike in shifted_spikes if in_window(spike, [-take_before, take_after])])
 
@@ -252,8 +252,8 @@ def plotFRs(job_id, stim_times, soma_v, t, tstop=0, window=0, take_before=150, t
 		H, B = np.histogram([j for i in PSTH for j in i], bins=bins)
 
 		if normalized:			
-			# H = [i/max(H) for i in H]
-			H = [i/sum(H) for i in H]
+			# H = [i/sum(H) for i in H]
+			H = [i/len(PSTH) for i in H]
 			h_ax.set_title('Normalized PSTH of Cell with Thalamic Input')
 			h_ax.set_ylabel('Spike Frequency (Normalized Spike Count)')
 		else:			
@@ -284,34 +284,111 @@ def plotFRs(job_id, stim_times, soma_v, t, tstop=0, window=0, take_before=150, t
 			h_ax.set_ylabel('Firing Rate (Hz)')
 
 		h_ax.axvline(0, LineStyle='--', LineWidth=1, color='k')
-		h_ax.legend()
+		h_ax.legend(loc='upper right')
 		h_ax.set_xlabel('Peri-Stimulus Time')
+
+		temp = [h_ax.get_xlim(), h_ax.get_ylim()]
+
+
+		if marker1_length: h_ax.fill_between([0, marker1_length], -10, temp[0][1], color='gray', alpha=0.1)
+		if marker2_length: h_ax.fill_between([ITI, ITI+marker2_length], -10, temp[0][1], color='green', alpha=0.1)
+		h_ax.set_xlim(temp[0])
+		h_ax.set_ylim(temp[1])
+		return mean_FRs
+
+	def plot_raster(h_ax, PSTHs):
+		if not h_ax:
+			fig, h_ax = plt.subplots(figsize=(13, 7.5))
+			fig.suptitle('Raster Plot for {}'.format(which_cell))
+			h_ax.set_title('Simulation details: {}ms bins, simulation length: {}s, job: {}'.format(window, int(tstop/1000), job_id))
+			fig.subplots_adjust(hspace=0.34, bottom=0.08, top=0.9, right=0.96, left=0.07) 
+			h_ax.set_xlabel('Peri-Stimulus Time (ms)')
+			h_ax.set_ylabel('Spike Times per Trial')
+			h_ax.axvline(0, LineStyle='--', color='gray')
+		if ITI: 
+			h_ax.axvline(ITI, LineStyle='--', LineWidth=1, color=vline_color)
+			h_ax.set_xlim([-5, take_after])
+
+		for i, p in enumerate(PSTHs):
+			if is_spontaneous:
+				h_ax.plot(p, [i]*len(p), '*', color=color)
+			else:
+				h_ax.plot(p, [i]*len(p),'|', color=color)
+		h_ax.set_yticks(range(len(PSTHs)))
+		h_ax.set_yticklabels(['# {}'.format(i) for i in range(len(PSTHs))])
+		temp = [h_ax.get_xlim(), h_ax.get_ylim()]
+		if marker1_length: h_ax.fill_between([0, marker1_length], -10, temp[0][1], color='gray', alpha=0.1)
+		if marker2_length: h_ax.fill_between([ITI, ITI+marker2_length], -10, temp[0][1], color='green', alpha=0.1)
+		h_ax.set_xlim(temp[0])
+		h_ax.set_ylim(-1, temp[1][1])
+
+		h_ax.plot(0, 0, label=which_cell, color=color)
+		h_ax.legend()
+
+		return h_ax
+
+
+	if hasattr(input_durations, "__len__"):
+		ITI = input_durations[0]
+		marker1_length = input_durations[1]
+		marker2_length = input_durations[2]
+	else:
+		ITI = input_durations
+		marker1_length = None
+		marker2_length = None
+
+
+	if take_after<ITI+100:
+		take_after = ITI+100
 	
 	spike_times = get_SpikeTimes(t, soma_v)
 	in_window = lambda time, inter: time > inter[0] and time <= inter[1] 
-
 	FRs, PSTH, bins = get_FR_and_PSTH(stim_times, spike_times)
 	
 	if not axes_h:
-		_, [[PSTH_ax, PSTH_ax_norm], [FR_ax, FR_ax_norm]] = plt.subplots(2, 2, figsize=(15, 7.5))
+		FR_fig, [[PSTH_ax, PSTH_ax_norm], [FR_ax, FR_ax_norm]] = plt.subplots(2, 2, figsize=(15, 7.5))
+		FR_fig.subplots_adjust(hspace=0.34, bottom=0.08, top=0.9) 
+		FR_fig.suptitle('Simulation details: {}ms bins, simulation length: {}s, job: {}'.format(window, int(tstop/1000), job_id))
+
 	else:
 		PSTH_ax 		= axes_h[0][0]
 		PSTH_ax_norm 	= axes_h[0][1]
 		FR_ax 			= axes_h[1][0]
-		FR_ax_norm 		= axes_h[1][1]
+		FR_ax_norm 		= axes_h[1][1]	
+
+	if ITI:
+		if return_FRs:vline_color = color
+		else:vline_color = 'g'
+		PSTH_ax.axvline(ITI, LineStyle='--', LineWidth=1, color=vline_color)
+		PSTH_ax_norm.axvline(ITI, LineStyle='--', LineWidth=1, color=vline_color)
+		FR_ax.axvline(ITI, LineStyle='--', LineWidth=1, color=vline_color)
+		FR_ax_norm.axvline(ITI, LineStyle='--', LineWidth=1, color=vline_color)
+	if is_spontaneous:
+		vline_color='k'		
 	
 	# PSTH
 	plot_PSTH(PSTH_ax, PSTH, bins)
 	plot_PSTH(PSTH_ax_norm, PSTH, bins, normalized=True)
 
 	# FR
-	plot_FR(FR_ax, FRs)
-	plot_FR(FR_ax_norm, FRs, normalized=True)
-	plt.gcf().subplots_adjust(hspace=0.34, bottom=0.08, top=0.9) 
+	mean_FRs = plot_FR(FR_ax, FRs)
+	_ = plot_FR(FR_ax_norm, FRs, normalized=True)
+	
+	raster_ax = plot_raster(raster_ax, PSTH)
 
-	plt.suptitle('Simulation details: {}ms bins, simulation length: {}s, job: {}'.format(window, int(tstop/1000), job_id))
+	if return_FRs:
+		if not single_ax:
+			single_fig, single_ax = plt.subplots()
+			single_fig.suptitle('Bins of {}ms'.format(window))
+		
+		plot_PSTH(single_ax, PSTH, bins)
+		single_ax.axvline(ITI, LineStyle='--', LineWidth=1, color=vline_color)
 
-	return [[PSTH_ax, PSTH_ax_norm], [FR_ax, FR_ax_norm]]
+		return [[PSTH_ax, PSTH_ax_norm], [FR_ax, FR_ax_norm]], single_ax, bins, raster_ax
+	else:
+		return [[PSTH_ax, PSTH_ax_norm], [FR_ax, FR_ax_norm]], raster_ax
+
+	
 
 
 
@@ -423,6 +500,8 @@ def Wehr_Zador_fromData(job_id, data, cell_name, stim_times, exc_weight=0, inh_w
 
 		h_ax.axvline(0, LineStyle='--', color='gray')
 		h_ax.plot(t_vec, [AMPA[i]+NMDA[i] for i in range(n_points)], 'purple', label='%s$_{AMPA}$ + %s$_{NMDA}$'%(which_plot, which_plot))
+		h_ax.plot(t_vec, AMPA, 'salmon', label='%s$_{AMPA}$'%(which_plot), alpha=0.5)
+		h_ax.plot(t_vec, NMDA, 'xkcd:magenta', label='%s$_{NMDA}$'%(which_plot), alpha=0.5)
 
 		if 'g_GABA' in all_means:
 			GABA = {}
@@ -441,6 +520,10 @@ def Wehr_Zador_fromData(job_id, data, cell_name, stim_times, exc_weight=0, inh_w
 		h_ax.set_title('Mean Synaptic %s'%which_traces)
 		h_ax.set_ylabel('%s (%s)'%(which_plot.upper(), units_))
 		h_ax.set_xlim([-take_before, take_after])
+
+	if stim_params['ITI']:
+		if take_after<stim_params['ITI']+300:
+			take_after = stim_params['ITI']+300
 
 	fig, axes = plt.subplots(3, 1, figsize=(9, 7.5))
 	fig.subplots_adjust(hspace=0.34, bottom=0.08, top=0.9) 
@@ -484,7 +567,7 @@ def Wehr_Zador_fromData(job_id, data, cell_name, stim_times, exc_weight=0, inh_w
 		v_vec = cut_vec(soma_v, idx1, idx2)
 		if any([i>=spike_threshold for i in v_vec]):
 			spike_count += 1
-
+		# pdb.set_trace()
 		all_means['g_AMPA'].append(cut_vec(g_AMPA, idx1, idx2))
 		all_means['g_NMDA'].append(cut_vec(g_NMDA, idx1, idx2))
 		all_means['i_AMPA'].append(cut_vec(i_AMPA, idx1, idx2))
@@ -500,7 +583,7 @@ def Wehr_Zador_fromData(job_id, data, cell_name, stim_times, exc_weight=0, inh_w
 			color_cond_dict = {'with_late_without_early': 'r', 'with_late_with_early': 'k', 'without_late_with_early': 'g', 'without_late_without_early': 'orange'}
 			detect_spike = lambda vec: [i for i in range(1, len(vec)-1) if (vec[i]>vec[i-1]) and (vec[i]>vec[i+1]) and (vec[i]>spike_threshold)]
 
-			if stim_params['type']=='pairs':
+			if 'pair' in stim_params['type']:
 				try: axes[0].axvline(stim_params['ITI'], color='gray', LineStyle='--', LineWidth=0.7)
 				except: print('In Wehr_Zador_fromData(): not marking 2nd stimulus on plot because no ITI given to function')
 
@@ -509,7 +592,7 @@ def Wehr_Zador_fromData(job_id, data, cell_name, stim_times, exc_weight=0, inh_w
 				late_start = int((take_before+stim_params['ITI'])/dt)
 				late_end = int((take_before+stim_params['ITI']+50)/dt)
 
-			elif stim_params['type']=='single':
+			elif 'single' in stim_params['type']:
 				early_start = int(take_before/dt)
 				early_end = int((take_before+30)/dt)
 				late_start = int((take_before+40)/dt)
@@ -554,6 +637,11 @@ def Wehr_Zador_fromData(job_id, data, cell_name, stim_times, exc_weight=0, inh_w
 	
 	# ========== Plot Currents ==========
 	plot_traces(t_vec_tot, n_points, axes[1], all_means, which_traces='Currents', units_='nA')
+	temp_f, temp_ax = plt.subplots()
+	plot_traces(t_vec_tot, n_points, temp_ax, all_means, which_traces='Currents', units_='nA')
+	temp_ax.set_xlabel('T (ms)')
+	temp_ax.set_ylabel('I (nA)')
+	temp_f.suptitle(cell_name)
 
 	# ========== Plot Conductances ==========
 	plot_traces(t_vec_tot, n_points, axes[2], all_means, which_traces='Conductances', units_='nS')
